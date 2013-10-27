@@ -2,18 +2,24 @@
 
 from obfsproxy.transports.base import BaseTransport
 import obfsproxy.common.log as logging
+from obfsproxy.network.buffer import Buffer
 
 from cocotools import cmap
 from bananaphone import parseEncodingSpec, getMarkovModel, getModelEncoder, toBytes, changeWordSize, buildWeightedRandomModel, truncateHash, readTextFile
+
+from scapy.all import hexdump
+
+
 
 log = logging.get_obfslogger()
 
 class BananaPhoneBuffer(object):
 
     def __init__(self):
-        self.output         = []
-        self.encodingSpec   = 'words,sha1,13'
-        self.corpusFilename = '/usr/share/dict/words'
+        self.output_bytes     = Buffer()
+        self.output_words     = Buffer()
+        self.encodingSpec     = 'words,sha1,13'
+        self.corpusFilename   = '/usr/share/dict/words'
 
         self.tokenize, self.hash, self.bits = parseEncodingSpec(self.encodingSpec)
 
@@ -23,44 +29,44 @@ class BananaPhoneBuffer(object):
         self.randomModel    = buildWeightedRandomModel(self.corpusTokens, self.truncatedHash)
         self.model          = getMarkovModel(self.randomModel, self.truncatedHash, self.corpusTokens, self.bits)
 
-    # BUG: but why does the coroutine pipeline return a null terminated string!?
-    # get a null terminated string every time... WTF
     def transcribeFrom(self, input):
-        self.drain()
+        #print "transcribeFrom"
         decoder = self.get_decoder()
         for byte in input:
+            #print "hex",
+            #hexdump(byte)
             decoder.send(byte)
         decoder.close()
-        return self.getOutput()[:-1]
+        #print "peek"
+        #hexdump(self.output_bytes.peek())
+        # BUG: wtf null terminated!?
+        return self.output_bytes.read()[:-1]
 
     def transcribeTo(self, input):
-        self.drain()
+        #print "transcribeTo"
         encoder = self.get_encoder()
         for byte in input:
+            #print "hex"
+            #hexdump(byte)
             encoder.send(byte)
         encoder.close()
-        return self.getOutput()
+        #print "peek"
+        #hexdump(self.output_words.peek())
+        return self.output_words.read()
 
-    # BUG: but why does the coroutine pipeline return a null terminated string!?
-    def getOutput(self):
-        data = "".join(self.output)
-        if data[-1] == '\x00':
-            print "got null tail"
-            return data[:-1]
-        return data
+    def wordSinkToList(self, input):
+        self.output_words.write(input)
 
-    def drain(self):
-        self.output = []
-
-    def byteSinkToBuffer(self, input):
-        self.output.append(input)
+    def byteSinkToStream(self, input):
+        assert len(input) == 1
+        self.output_bytes.write(input)
 
     def get_decoder(self):
-        return toBytes | self.tokenize | cmap( truncateHash( self.hash, self.bits ) ) | changeWordSize( self.bits, 8 ) | cmap( chr ) > self.byteSinkToBuffer
+        return toBytes | self.tokenize | cmap( truncateHash( self.hash, self.bits ) ) | changeWordSize( self.bits, 8 ) | cmap( chr ) > self.byteSinkToStream
 
     def get_encoder(self):
         model_encoder = getModelEncoder(self.randomModel, self.model)
-        return toBytes | cmap(ord) | changeWordSize(8, self.bits) | cmap(model_encoder) > self.byteSinkToBuffer
+        return toBytes | cmap(ord) | changeWordSize(8, self.bits) | cmap(model_encoder) > self.wordSinkToList
 
 
 class BananaphoneTransport(BaseTransport):
