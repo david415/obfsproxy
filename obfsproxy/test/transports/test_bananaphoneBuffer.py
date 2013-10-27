@@ -3,32 +3,27 @@
 import unittest
 import twisted.trial.unittest
 
-
-# TODO: proper unit tests and fix all the things. it works... i use this for testing.
-import sys
-sys.path.append("../../..")
-
 from obfsproxy.transports.bananaphone_transport import BananaPhoneBuffer
 
+class test_BananaPhoneBuffer(twisted.trial.unittest.TestCase):
 
-def main():
+    @classmethod
+    def setUpClass(cls):
+        cls.seed_str = 'the quick brown fox'
+        cls.bananaBuffer = BananaPhoneBuffer()
+        cls.result1 = cls.bananaBuffer.transcribeTo(cls.seed_str)
 
-    bananaBuffer = BananaPhoneBuffer()
-    result1 = bananaBuffer.transcribeTo('the quick brown fox')
-    print "result1 %s" % result1
-    bananaBuffer.drain()
+    def test_1(self):
+        self.result2 = self.bananaBuffer.transcribeFrom(self.result1)
+        self.assertEqual(self.result2, self.seed_str)
 
-    #result1 = bananaBuffer.transcribeTo('the quick brown fox')
-    #print "result1 %s" % result1
-    #bananaBuffer.drain()
-
-    result2 = bananaBuffer.transcribeFrom(result1)
-    print "result2 %s" % result2
-    bananaBuffer.drain()
-
-    result3 = bananaBuffer.transcribeTo(result2)
-    print "result3 %s" % result3
-
+    def test_2(self):
+        result3 = self.bananaBuffer.transcribeTo(self.seed_str)
+        left = self.bananaBuffer.transcribeFrom(self.result1)
+        right = self.bananaBuffer.transcribeFrom(result3)
+        self.assertEqual(left, right)
+        self.assertEqual(left, self.seed_str)
 
 if __name__ == '__main__':
-    main()
+    unittest.main()
+

@@ -3,7 +3,8 @@
 from obfsproxy.transports.base import BaseTransport
 import obfsproxy.common.log as logging
 
-from bananaphone import rh_encoder, rh_decoder
+from cocotools import cmap
+from bananaphone import parseEncodingSpec, getMarkovModel, getModelEncoder, toBytes, changeWordSize, buildWeightedRandomModel, truncateHash, readTextFile
 
 
 log = logging.get_obfslogger()
@@ -11,22 +12,35 @@ log = logging.get_obfslogger()
 class BananaPhoneBuffer(object):
 
     def __init__(self):
-        self.output     = []
+        self.output         = []
+        self.encodingSpec   = 'words,sha1,13'
+        self.corpusFilename = '/usr/share/dict/words'
 
-        encoder             = rh_encoder("words,sha1,13", "markov", "/usr/share/dict/words")
-        self.encoder_target = encoder > self.byteSinkToBuffer
-        self.decoder_target = rh_decoder("words,sha1,13") > self.byteSinkToBuffer
+        self.tokenize, self.hash, self.bits = parseEncodingSpec(self.encodingSpec)
+
+        self.corpusTokens   = list( self.tokenize < readTextFile( self.corpusFilename ) )
+        self.truncatedHash  = truncateHash(self.hash, self.bits)
+
+        self.randomModel    = buildWeightedRandomModel(self.corpusTokens, self.truncatedHash)
+        self.model          = getMarkovModel(self.randomModel, self.truncatedHash, self.corpusTokens, self.bits)
 
     def transcribeFrom(self, input):
+        self.drain()
+        decoder = self.get_decoder()
         for byte in input:
-            self.decoder_target.send(byte)
-        self.decoder_target.close()
-        return "".join(self.output)
+            decoder.send(byte)
+        decoder.close()
+        return self.getOutput().rstrip("\0")
 
     def transcribeTo(self, input):
+        self.drain()
+        encoder = self.get_encoder()
         for byte in input:
-            self.encoder_target.send(byte)
-        self.encoder_target.close()
+            encoder.send(byte)
+        encoder.close()
+        return self.getOutput()
+
+    def getOutput(self):
         return "".join(self.output)
 
     def drain(self):
@@ -34,6 +48,13 @@ class BananaPhoneBuffer(object):
 
     def byteSinkToBuffer(self, input):
         self.output.append(input)
+
+    def get_decoder(self):
+        return toBytes | self.tokenize | cmap( truncateHash( self.hash, self.bits ) ) | changeWordSize( self.bits, 8 ) | cmap( chr ) > self.byteSinkToBuffer
+
+    def get_encoder(self):
+        model_encoder = getModelEncoder(self.randomModel, self.model)
+        return toBytes | cmap(ord) | changeWordSize(8, self.bits) | cmap(model_encoder) > self.byteSinkToBuffer
 
 
 class BananaphoneTransport(BaseTransport):
