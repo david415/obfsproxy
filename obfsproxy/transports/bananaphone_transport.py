@@ -6,7 +6,6 @@ import obfsproxy.common.log as logging
 from cocotools import cmap
 from bananaphone import parseEncodingSpec, getMarkovModel, getModelEncoder, toBytes, changeWordSize, buildWeightedRandomModel, truncateHash, readTextFile
 
-
 log = logging.get_obfslogger()
 
 class BananaPhoneBuffer(object):
@@ -24,13 +23,15 @@ class BananaPhoneBuffer(object):
         self.randomModel    = buildWeightedRandomModel(self.corpusTokens, self.truncatedHash)
         self.model          = getMarkovModel(self.randomModel, self.truncatedHash, self.corpusTokens, self.bits)
 
+    # BUG: but why does the coroutine pipeline return a null terminated string!?
+    # get a null terminated string every time... WTF
     def transcribeFrom(self, input):
         self.drain()
         decoder = self.get_decoder()
         for byte in input:
             decoder.send(byte)
         decoder.close()
-        return self.getOutput().rstrip("\0")
+        return self.getOutput()[:-1]
 
     def transcribeTo(self, input):
         self.drain()
@@ -40,8 +41,13 @@ class BananaPhoneBuffer(object):
         encoder.close()
         return self.getOutput()
 
+    # BUG: but why does the coroutine pipeline return a null terminated string!?
     def getOutput(self):
-        return "".join(self.output)
+        data = "".join(self.output)
+        if data[-1] == '\x00':
+            print "got null tail"
+            return data[:-1]
+        return data
 
     def drain(self):
         self.output = []
@@ -63,10 +69,12 @@ class BananaphoneTransport(BaseTransport):
         self.bananaBuffer = BananaPhoneBuffer()
 
     def receivedDownstream(self, data, circuit):
-        circuit.upstream.write(self.bananaBuffer.transcribeTo(data.read()))
+        circuit.upstream.write(self.bananaBuffer.transcribeFrom(data.read()))
+        return
 
     def receivedUpstream(self, data, circuit):
-        circuit.downstream.write(self.bananaBuffer.transcribeFrom(data.read()))
+        circuit.downstream.write(self.bananaBuffer.transcribeTo(data.read()))
+        return
 
 
 class BananaphoneClient(BananaphoneTransport):
