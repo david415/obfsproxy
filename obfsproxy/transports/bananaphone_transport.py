@@ -80,16 +80,29 @@ class BananaphoneTransport(BaseTransport):
                     log.info("Handshake OK: client server corpus hash match!")
                     self.wait_for_hash = False
                     data.drain()
+                    circuit.downstream.write('OK')
                     return
                 else:
-                    log.info("Handshake error: client server corpus hash mismatch!")
+                    log.info("Handshake FAIL: client server corpus hash mismatch!")
+                    data.drain()
+                    circuit.downstream.write('FAIL')
+                    return
+
+            circuit.upstream.write(self.bananaBuffer.transcribeFrom(data.read()))
+        else:
+            if self.wait_for_reply:
+                if data.peek() == 'OK':
+                    log.info("Handshake OK: client server corpus hash match!")
+                    self.wait_for_reply = False
+                    data.drain()
+                    return
+                elif data.peek() == 'FAIL':
+                    log.info("Handshake FAIL: client server corpus hash mismatch!")
                     data.drain()
                     circuit.downstream.close()
                     circuit.upstream.close()
                     return
 
-            circuit.upstream.write(self.bananaBuffer.transcribeFrom(data.read()))
-        else:
             circuit.upstream.write(self.bananaBuffer.transcribeFrom(data.read()))   
         return
 
@@ -113,6 +126,7 @@ class BananaphoneClient(BananaphoneTransport):
     
     def __init__(self, transport_config):
         self.we_are_initiator = True
+        self.wait_for_reply   = True
 
         BananaphoneTransport.__init__(self, transport_config)
 
