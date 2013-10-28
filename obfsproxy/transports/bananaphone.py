@@ -369,59 +369,6 @@ words3 = appendTo(TOKENIZERS)( streamTokenizer( " \n.,;?!" )
 
 MODELS = []
 
-def getMarkovModel(randomModel, truncatedHash, corpusTokens, bits, order=1, abridged=None):
-    order         = int( order )
-    percentFull   = getPercentFull( randomModel, bits )
-    assert percentFull == 100, "not enough tokens for %s-bit hashing (%s%% there)" % (bits, percentFull)
-    model = buildHashPartitionedMarkovModel( corpusTokens, truncatedHash, order )
-    debug( "%s states (%s tokens, %s unique, order=%s)" % ( len(model), len(corpusTokens), len( set(corpusTokens) ), order ) )
-
-    if abridged == "--abridged":
-        abridgedMarkovModel = removeIncompleteSpaces( model, bits )
-        incompleteStates  = len(model) - len(abridgedMarkovModel)
-        debug( "%s states which lead to incomplete hash spaces will not be used." % ( incompleteStates, ) )
-        model = abridgedMarkovModel
-    else:
-        assert abridged == None, "Unrecognized option: %s" % ( abridged, )
-    return model
-
-def getModelEncoder(randomModel, model, order=1):
-
-    class stats:
-        total   = 0
-        adhered = order - 1
-
-    prevList = [ None ]
-
-    def encode ( value ):
-
-        prevTuple = tuple( prevList )
-        stats.total += 1
-
-        if prevTuple in model and value in model[ prevTuple ] and len(model[ prevTuple ][ value ]):
-            stats.adhered += 1
-            choices = []
-            for token, count in model[ prevTuple ][ value ].items():
-                choices.extend( [token] * count )
-        
-        else:
-            choices = randomModel[ value ]
-        
-        nextWord = choice( choices )
-
-        if stats.total >= order:
-            prevList.pop(0)
-
-        prevList.append( nextWord )
-
-        if not stats.total % 10**5:
-            debug( "%s words encoded, %s%% adhering to model" % ( stats.total, (100.0* stats.adhered / stats.total ) ) )
-
-        return nextWord
-
-    return encode
-
-
 @appendTo(MODELS)
 def markov ( tokenize, hash, bits, corpusFilename, order=1, abridged=None ):
     truncatedHash = truncateHash( hash, bits )

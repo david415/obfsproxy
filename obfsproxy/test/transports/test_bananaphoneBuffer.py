@@ -6,24 +6,16 @@ from struct import pack
 
 from obfsproxy.transports.bananaphone_transport import BananaPhoneBuffer
 
-from scapy.all import hexdump
-
 class test_BananaPhoneBuffer(twisted.trial.unittest.TestCase):
 
     @classmethod
     def setUpClass(cls):
-        #cls.seed_str = 'the quick brown fox the quick brown fox the quick brown fox the quick brown fox the quick brown fox'
-        
-        #cls.seed_str = '\xEF'
-        cls.seed_str = '\xDE\xAD\x07\xBE\xEF'
-        hexdump(cls.seed_str)
+        cls.seed_str = '\xDE\xAD\x00\xBE\xEF'
 
         #bytes = []
         #for i in range(255):
         #    bytes.append(chr(i))
-
         #cls.seed_str = "".join(bytes)
-        #cls.seed_str = cls.seed_str.rstrip('\x00')
 
         cls.bananaBuffer = BananaPhoneBuffer()
         cls.result1 = cls.bananaBuffer.transcribeTo(cls.seed_str)
@@ -39,20 +31,8 @@ class test_BananaPhoneBuffer(twisted.trial.unittest.TestCase):
         self.assertEqual(left, right)
 
     def test_3(self):
-
         flip = self.bananaBuffer.transcribeTo(self.seed_str)
-
         flop = self.bananaBuffer.transcribeFrom(flip)
-
-        print "flip"
-        hexdump(flip)
-
-        print "flop"
-        hexdump(flop)
-
-        print "seed_str"
-        hexdump(self.seed_str)
-
         self.assertEqual(flop, self.seed_str)
 
 
