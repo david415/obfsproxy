@@ -5,6 +5,7 @@ import obfsproxy.common.log as logging
 from obfsproxy.network.buffer import Buffer
 
 from bananaphone import rh_decoder, rh_encoder
+import hashlib
 
 
 log = logging.get_obfslogger()
@@ -52,9 +53,44 @@ class BananaphoneTransport(BaseTransport):
             log.debug("Setting corpus to default: '%s'", self.corpus)
 
         self.bananaBuffer = BananaPhoneBuffer(corpusFilename=self.corpus)
+        self.corpusHash = self.getCorpusHash()
+
+    def getCorpusHash(self):
+        BLOCKSIZE = 65536
+        hasher = hashlib.sha1()
+        fh  = open(self.corpus, 'rb')
+        buf = fh.read(BLOCKSIZE)
+        while len(buf) > 0:
+            hasher.update(buf)
+            buf = fh.read(BLOCKSIZE)
+        hash = hasher.hexdigest()
+        log.debug("local corpus hash %s", hash)
+        return hash
+
+    def handshake(self, circuit):
+        if self.we_are_initiator:
+            circuit.downstream.write(self.corpusHash)
 
     def receivedDownstream(self, data, circuit):
-        circuit.upstream.write(self.bananaBuffer.transcribeFrom(data.read()))
+        if not self.we_are_initiator:
+            if self.wait_for_hash:
+                if len(data.peek()) != len(self.corpusHash):
+                    return
+                if data.peek() == self.corpusHash:
+                    log.info("Handshake OK: client server corpus hash match!")
+                    self.wait_for_hash = False
+                    data.drain()
+                    return
+                else:
+                    log.info("Handshake error: client server corpus hash mismatch!")
+                    data.drain()
+                    circuit.downstream.close()
+                    circuit.upstream.close()
+                    return
+
+            circuit.upstream.write(self.bananaBuffer.transcribeFrom(data.read()))
+        else:
+            circuit.upstream.write(self.bananaBuffer.transcribeFrom(data.read()))   
         return
 
     def receivedUpstream(self, data, circuit):
@@ -74,8 +110,18 @@ class BananaphoneTransport(BaseTransport):
 
 
 class BananaphoneClient(BananaphoneTransport):
-    pass
+    
+    def __init__(self, transport_config):
+        self.we_are_initiator = True
+
+        BananaphoneTransport.__init__(self, transport_config)
 
 class BananaphoneServer(BananaphoneTransport):
-    pass
+   
+    def __init__(self, transport_config):
+        self.we_are_initiator = False
+        self.wait_for_hash    = True
+
+        BananaphoneTransport.__init__(self, transport_config)
+
 
