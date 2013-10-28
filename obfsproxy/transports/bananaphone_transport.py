@@ -11,12 +11,12 @@ log = logging.get_obfslogger()
 
 class BananaPhoneBuffer(object):
 
-    def __init__(self):
+    def __init__(self, corpusFilename=None):
         self.output_bytes     = Buffer()
         self.output_words     = Buffer()
         self.encodingSpec     = 'words,sha1,4'
         self.modelName        = 'markov'
-        self.corpusFilename   = '/usr/share/dict/words'
+        self.corpusFilename   = corpusFilename
 
         self.encoder = rh_encoder(self.encodingSpec, self.modelName, self.corpusFilename) > self.wordSinkToBuffer
         self.decoder = rh_decoder(self.encodingSpec) > self.byteSinkToBuffer
@@ -41,7 +41,17 @@ class BananaPhoneBuffer(object):
 class BananaphoneTransport(BaseTransport):
     
     def __init__(self, transport_config):
-        self.bananaBuffer = BananaPhoneBuffer()
+
+        transport_options = transport_config.getServerTransportOptions()
+        if transport_options and 'corpus' in transport_options:
+            log.debug("Setting corpus from server transport options: '%s'", transport_options['corpus'])
+            self.corpus = transport_options['corpus']
+
+        if not hasattr(self, 'corpus'):
+            self.corpus = '/usr/share/dict/words'
+            log.debug("Setting corpus to default: '%s'", self.corpus)
+
+        self.bananaBuffer = BananaPhoneBuffer(corpusFilename=self.corpus)
 
     def receivedDownstream(self, data, circuit):
         circuit.upstream.write(self.bananaBuffer.transcribeFrom(data.read()))
@@ -50,6 +60,17 @@ class BananaphoneTransport(BaseTransport):
     def receivedUpstream(self, data, circuit):
         circuit.downstream.write(self.bananaBuffer.transcribeTo(data.read()))
         return
+
+    @classmethod
+    def register_external_mode_cli(cls, subparser):
+        subparser.add_argument('--corpus', type=str, help='Corpus file of words')
+        super(BananaphoneTransport, cls).register_external_mode_cli(subparser)
+
+    @classmethod
+    def validate_external_mode_cli(cls, args):
+        if args.corpus:
+            cls.corpus = args.corpus
+        super(BananaphoneTransport, cls).validate_external_mode_cli(args)
 
 
 class BananaphoneClient(BananaphoneTransport):
