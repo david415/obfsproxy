@@ -5,6 +5,7 @@ import obfsproxy.common.log as logging
 from obfsproxy.network.buffer import Buffer
 
 from bananaphone import rh_decoder, rh_encoder
+from binascii import hexlify
 
 # https://github.com/seanlynch/pynacl
 import nacl
@@ -59,28 +60,25 @@ class BananaphoneTransport(BaseTransport):
             self.corpus = '/usr/share/dict/words'
             log.debug("Setting corpus to default: '%s'", self.corpus)
 
+        self.queued_data = Buffer()
+
         self.remote_publicKey = None
         self.secretKey = nacl.randombytes(nacl.crypto_stream_KEYBYTES)
         self.publicKey, self.privateKey = nacl.crypto_box_keypair()
         self.bananaBuffer = BananaPhoneBuffer(corpusFilename=self.corpus)
 
-    def handshake(self, circuit):
-        if self.we_are_initiator:
-            log.debug("initiating key exchange")
-            log.debug("sending public key")
-            self.state = ST_WAIT_FOR_PUBLIC_KEY
-            circuit.downstream.write(self.publicKey)
-
     def sendSecretKey(self, circuit):
         log.debug("sending secret key")
         nonce      = nacl.randombytes(nacl.crypto_box_NONCEBYTES)
         ciphertext = nacl.crypto_box(self.secretKey, nonce, self.publicKey, self.privateKey)
+        log.debug(hexlify(ciphertext))
         circuit.upstream.write(ciphertext)
 
     def receivedSecretKey(self, data):
         remote_secretKey = data.peek(nacl.crypto_stream_KEYBYTES)
         if len(remote_secretKey) == nacl.crypto_stream_KEYBYTES:
             log.debug("received secret key")
+            log.debug(hexlify(remote_secretKey))
             self.remote_secretKey = remote_secretKey
             data.drain()
             return True
@@ -91,14 +89,23 @@ class BananaphoneTransport(BaseTransport):
         remote_publicKey = data.peek(nacl.crypto_box_PUBLICKEYBYTES)
         if len(remote_publicKey) == nacl.crypto_box_PUBLICKEYBYTES:
             log.debug("received public key")
+            log.debug(hexlify(remote_publicKey))
             self.remote_publicKey = remote_publicKey
             data.drain()
             return True
         log.debug("did NOT received public key")
         return False
 
-    def receivedDownstream(self, data, circuit):
+    def handshake(self, circuit):
+        if self.we_are_initiator:
+            log.debug("initiating key exchange")
+            log.debug("sending public key")
+            log.debug(hexlify(self.publicKey))
+            log.debug("client now awaiting server's public key")
+            self.state = ST_WAIT_FOR_PUBLIC_KEY
+            circuit.downstream.write(self.publicKey)
 
+    def receivedDownstream(self, data, circuit):
         if self.state == ST_ENCRYPTED:
             circuit.upstream.write(self.bananaBuffer.transcribeFrom(data.read()))
             return
@@ -116,6 +123,7 @@ class BananaphoneTransport(BaseTransport):
                 self.state = ST_WAIT_FOR_SECRET_KEY
                 log.debug("sending public key")
                 circuit.upstream.write(self.publicKey)
+                log.debug(hexlify(self.publicKey))
                 log.debug("waiting for client's secret key")
                 return
 
@@ -126,10 +134,18 @@ class BananaphoneTransport(BaseTransport):
             if self.we_are_initiator:
                 self.sendSecretKey(circuit)
                 log.info("key exchange complete!")
+
+            if len(self.queued_data) > 0:
+                circuit.upstream.write(self.bananaBuffer.transcribeFrom(self.queued_data.read()))
                 return
 
 
     def receivedUpstream(self, data, circuit):
+        if self.state != ST_ENCRYPTED:
+            log.debug("Got upstream data before key exchange. Caching.")
+            self.queued_data.write(data.read())
+            return
+
         circuit.downstream.write(self.bananaBuffer.transcribeTo(data.read()))
         return
 
