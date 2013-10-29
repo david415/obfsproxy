@@ -117,11 +117,18 @@ TODO:
 __author__    = "Leif Ryge <leif@synthesize.us>"
 __copyright__ = "No Rights Reserved, Uncopyright 2012"
 
+# External modules
 import os, sys, time, readline
 from random      import choice, randrange
 from hashlib     import md5, sha1, sha224, sha256, sha384, sha512
 from itertools   import islice, imap
 from collections import deque
+
+# This version of pynacl has the crypto_stream api!
+# https://github.com/seanlynch/pynacl
+import nacl
+
+# Internal module
 from cocotools   import cmap, cfilter, coroutine, composable, cdebug, cmapstar, tee, coThreadWithQueueAccess, pv
 
 HASHES  = [ md5, sha1, sha224, sha256, sha384, sha512 ]
@@ -561,6 +568,20 @@ def hammertime_decoder ( target ):
             if frameType == 0:
                 target.send( byte )
 
+# should we rename to saltyStreamEncoder?
+def naclStreamEncoder( key ):
+    @coroutine
+    def _naclStreamEncoder( target ):
+        counter    = 0
+        while True:
+            counter   += 1
+            # BUG: count with all the bits!
+            nonce      = pack('LLL', 0,0,counter)
+            packet     = yield
+            ciphertext = nacl.crypto_stream_xor(packet, nonce, key)
+            target.send(ciphertext)
+    return _naclStreamEncoder
+
 def throttle ( bps ):
     "Throttles, but not quite how much you ask it to yet. FIXME"
     @coroutine
@@ -725,9 +746,13 @@ def hammertime_server( ):
 
 
 @appendTo( CODECS )
-def hammertime_rh_server ( encodingSpec="words,sha1,13", model="random", filename="/usr/share/dict/words", *modelArgs ):
-    return hammertime_encoder | rh_encoder( encodingSpec, model, filename, *modelArgs ), \
-           rh_decoder( encodingSpec ) | hammertime_decoder
+def hammertime_rh_server ( key=None, encodingSpec="words,sha1,13", model="random", filename="/usr/share/dict/words", *modelArgs ):
+
+    nacl_encoder = naclStreamEncoder(key)
+    nacl_decoder = naclStreamEncoder(key)
+
+    return hammertime_encoder | nacl_encoder | rh_encoder( encodingSpec, model, filename, *modelArgs ), \
+        rh_decoder( encodingSpec ) | nacl_decoder | hammertime_decoder
 
 
 class usage ( composable ):

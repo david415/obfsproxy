@@ -4,7 +4,9 @@ from obfsproxy.transports.base import BaseTransport
 import obfsproxy.common.log as logging
 from obfsproxy.network.buffer import Buffer
 
-from bananaphone import rh_decoder, rh_encoder
+
+import nacl
+from bananaphone import hammertime_rh_server
 
 
 log = logging.get_obfslogger()
@@ -18,8 +20,16 @@ class BananaPhoneBuffer(object):
         self.modelName        = 'markov'
         self.corpusFilename   = corpusFilename
 
-        self.encoder = rh_encoder(self.encodingSpec, self.modelName, self.corpusFilename) > self.wordSinkToBuffer
-        self.decoder = rh_decoder(self.encodingSpec) > self.byteSinkToBuffer
+        self.key = nacl.randombytes(nacl.crypto_stream_KEYBYTES)
+
+        (self.encoder, self.decoder) = hammertime_rh_server(key          = self.key,
+                                                            encodingSpec = self.encodingSpec, 
+                                                            model        = self.modelName,
+                                                            filename     = self.corpusFilename)
+
+        self.encoder = self.encoder > self.wordSinkToBuffer
+        self.decoder = self.decoder > self.byteSinkToBuffer
+
 
     def transcribeFrom(self, input):
         for byte in input:
