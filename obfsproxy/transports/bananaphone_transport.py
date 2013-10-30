@@ -27,6 +27,8 @@ class BananaPhoneBuffer(object):
         self.modelName        = 'markov'
         self.corpusFilename   = corpusFilename
 
+        self.pending_data_to_send = False
+
         self.encoder = rh_encoder(self.encodingSpec, self.modelName, self.corpusFilename) > self.wordSinkToBuffer
         self.decoder = rh_decoder(self.encodingSpec) > self.byteSinkToBuffer
 
@@ -60,9 +62,8 @@ class BananaphoneTransport(BaseTransport):
             self.corpus = '/usr/share/dict/words'
             log.debug("Setting corpus to default: '%s'", self.corpus)
 
-        self.queued_data = Buffer()
-
         self.remote_publicKey = None
+        self.remote_secretkey = None
         self.secretKey = nacl.randombytes(nacl.crypto_stream_KEYBYTES)
         self.publicKey, self.privateKey = nacl.crypto_box_keypair()
         self.bananaBuffer = BananaPhoneBuffer(corpusFilename=self.corpus)
@@ -71,79 +72,103 @@ class BananaphoneTransport(BaseTransport):
         log.debug("sending secret key")
         nonce      = nacl.randombytes(nacl.crypto_box_NONCEBYTES)
         ciphertext = nacl.crypto_box(self.secretKey, nonce, self.publicKey, self.privateKey)
+
         log.debug(hexlify(ciphertext))
         circuit.upstream.write(ciphertext)
 
     def receivedSecretKey(self, data):
+        log.debug("receivedSecretKey")
+        log.debug("data len %s" % len(data))
+
         remote_secretKey = data.peek(nacl.crypto_stream_KEYBYTES)
         if len(remote_secretKey) == nacl.crypto_stream_KEYBYTES:
             log.debug("received secret key")
             log.debug(hexlify(remote_secretKey))
             self.remote_secretKey = remote_secretKey
-            data.drain()
+            data.drain(nacl.crypto_stream_KEYBYTES)
+            self.state = ST_ENCRYPTED
             return True
         log.debug("did NOT received secret key")
+        log.debug("got:%s" % hexlify(remote_secretKey))
         return False        
 
     def receivedPublicKey(self, data):
+        log.debug("receivedPublicKey data len %s" % len(data))
+        if self.we_are_initiator:
+            log.debug("client")
+        else:
+            log.debug("server")
+
         remote_publicKey = data.peek(nacl.crypto_box_PUBLICKEYBYTES)
         if len(remote_publicKey) == nacl.crypto_box_PUBLICKEYBYTES:
             log.debug("received public key")
             log.debug(hexlify(remote_publicKey))
             self.remote_publicKey = remote_publicKey
-            data.drain()
+            data.drain(nacl.crypto_box_PUBLICKEYBYTES)
             return True
         log.debug("did NOT received public key")
+        log.debug("got:%s" % hexlify(remote_publicKey))
         return False
 
     def handshake(self, circuit):
         if self.we_are_initiator:
             log.debug("initiating key exchange")
-            log.debug("sending public key")
-            log.debug(hexlify(self.publicKey))
+            log.debug("sending public key %s" % hexlify(self.publicKey))
             log.debug("client now awaiting server's public key")
-            self.state = ST_WAIT_FOR_PUBLIC_KEY
             circuit.downstream.write(self.publicKey)
+            self.state = ST_WAIT_FOR_PUBLIC_KEY
 
     def receivedDownstream(self, data, circuit):
+
         if self.state == ST_ENCRYPTED:
+
+            if self.pending_data_to_send:
+                log.debug("%s: We got pending data to send and our crypto is ready. Pushing!" % log_prefix)
+                self.receivedUpstream(circuit.upstream.buffer, circuit)
+                self.pending_data_to_send = False
+
             circuit.upstream.write(self.bananaBuffer.transcribeFrom(data.read()))
             return
 
-        if self.state == ST_WAIT_FOR_PUBLIC_KEY:
-            if not self.receivedPublicKey(data):
+        if self.we_are_initiator:
+
+            if self.state == ST_WAIT_FOR_PUBLIC_KEY:
+                if self.receivedPublicKey(data):
+                    self.sendSecretKey(circuit)
+                    log.debug("waiting for server's secret key")
+                    self.state = ST_WAIT_FOR_SECRET_KEY
                 return
 
-            if self.we_are_initiator:
-                self.state = ST_WAIT_FOR_SECRET_KEY
-                self.sendSecretKey(circuit)
-                log.debug("waiting for server's secret key")
+            if self.state == ST_WAIT_FOR_SECRET_KEY:
+                if self.receivedSecretKey(data):
+                    log.info("key exchange complete!")
+                    self.state = ST_ENCRYPTED
                 return
-            else:
-                self.state = ST_WAIT_FOR_SECRET_KEY
-                log.debug("sending public key")
-                circuit.upstream.write(self.publicKey)
-                log.debug(hexlify(self.publicKey))
-                log.debug("waiting for client's secret key")
+        else:
+
+            if self.state == ST_WAIT_FOR_PUBLIC_KEY:
+                if self.receivedPublicKey(data):
+                    log.debug("sending public key")
+                    circuit.upstream.write(self.publicKey)
+                    log.debug(hexlify(self.publicKey))
+                    log.debug("waiting for client's secret key")
+                    self.state = ST_WAIT_FOR_SECRET_KEY
                 return
 
-        if self.state == ST_WAIT_FOR_SECRET_KEY:
-            if not self.receivedSecretKey(data):
+            if self.state == ST_WAIT_FOR_SECRET_KEY:
+                if self.receivedSecretKey(data):
+                    log.info("secret key received")
+                    log.info("sending secret key")
+                    self.sendSecretKey(circuit)
+                    log.info("key exchange complete!")
+                    self.self = ST_ENCRYPTED
                 return
-            self.state = ST_ENCRYPTED
-            if self.we_are_initiator:
-                self.sendSecretKey(circuit)
-                log.info("key exchange complete!")
-
-            if len(self.queued_data) > 0:
-                circuit.upstream.write(self.bananaBuffer.transcribeFrom(self.queued_data.read()))
-                return
-
 
     def receivedUpstream(self, data, circuit):
+
         if self.state != ST_ENCRYPTED:
-            log.debug("Got upstream data before key exchange. Caching.")
-            self.queued_data.write(data.read())
+            log.debug("Got upstream data before key exchange. Caching. %s" % len(data))
+            self.pending_data_to_send = True
             return
 
         circuit.downstream.write(self.bananaBuffer.transcribeTo(data.read()))
