@@ -67,8 +67,18 @@ class BananaphoneTransport(BaseTransport):
                                               order          = self.order,
                                               abridged       = self.abridged)
 
+        self.in_count  = 0
+        self.out_count = 0
+
+
     def receivedDownstream(self, data, circuit):
-        circuit.upstream.write(self.bananaBuffer.transcribeFrom(data.read()))
+        buffer          = data.read()
+        self.out_count += len(buffer)
+        orig_bytes      = self.bananaBuffer.transcribeFrom(buffer)
+        self.in_count  += len(orig_bytes)
+
+        circuit.upstream.write(orig_bytes)
+        log.debug("%s %s" % (self.in_count, self.out_count))
         return
 
     def receivedUpstream(self, data, circuit):
