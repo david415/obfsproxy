@@ -75,11 +75,15 @@ decode "Hello\n" from 13-bit words using the composable coroutine API:
 start a proxy listener for $sshhost, using markov encoder with 2 bits per word:
     socat TCP4-LISTEN:1234,fork EXEC:'bash -c "./bananaphone.py\\ pipeline\\ rh_decoder(words,sha1,2)|socat\\ TCP4\:'$sshhost'\:22\\ -|./bananaphone.py\\ -v\\ rh_encoder\\ words,sha1,2\\ markov\\ corpus.txt"' # FIXME: shell quoting is broken in this example usage after moving to the pipeline model
 
-same as above, but using bananaphone.tcp_proxy instead of socat as the server:
-    python -m bananaphone tcp_proxy rh_server words,sha1,2 markov corpus.txt
-
 connect to the ssh host through the $proxyhost:
     ssh user@host -oProxyCommand="./bananaphone.py pipeline 'rh_encoder((words,sha1,2),\"markov\",\"corpus.txt\")'|socat TCP4:$proxyhost:1234 -|./bananaphone.py pipeline 'rh_decoder((words,sha1,2))'"
+
+same as above, but using bananaphone.tcp_proxy instead of socat as the server:
+    server:
+        python -m bananaphone tcp_proxy 1234 localhost:22 rh_server words,sha1,2 markov corpus.txt
+
+    client:
+        ssh user@host -oProxyCommand="python -m bananaphone tcp_client $proxyhost:1234 rh_client words,sha1,2 markov corpus.txt"
 
 === Hammertime encoding ===
 
@@ -117,19 +121,12 @@ TODO:
 __author__    = "Leif Ryge <leif@synthesize.us>"
 __copyright__ = "No Rights Reserved, Uncopyright 2012"
 
-# External modules
 import os, sys, time, readline
 from random      import choice, randrange
 from hashlib     import md5, sha1, sha224, sha256, sha384, sha512
 from itertools   import islice, imap
 from collections import deque
-
-# This version of pynacl has the crypto_stream api!
-# https://github.com/seanlynch/pynacl
-import nacl
-
-# Internal module
-from cocotools   import cmap, cfilter, coroutine, composable, cdebug, cmapstar, tee, coThreadWithQueueAccess, pv
+from cocotools   import cmap, cfilter, coroutine, composable, cdebug, cmapstar, tee, coThread, pv
 
 HASHES  = [ md5, sha1, sha224, sha256, sha384, sha512 ]
 GLOBALS = globals()
@@ -524,7 +521,7 @@ def rh_print_corpus_stats ( encodingSpec, corpusFilename, order=1 ):
 
 from Queue import Empty
 
-@coThreadWithQueueAccess
+@coThread.withQueueAccess
 def hammertime_encoder ( queue, target ):
     """
     This adds chaff to a bytestream to impede passive timing analysis.
@@ -567,20 +564,6 @@ def hammertime_decoder ( target ):
             byte = yield
             if frameType == 0:
                 target.send( byte )
-
-# should we rename to saltyStreamEncoder?
-def naclStreamEncoder( key ):
-    @coroutine
-    def _naclStreamEncoder( target ):
-        counter    = 0
-        while True:
-            counter   += 1
-            # BUG: count with all the bits!
-            nonce      = pack('LLL', 0,0,counter)
-            packet     = yield
-            ciphertext = nacl.crypto_stream_xor(packet, nonce, key)
-            target.send(ciphertext)
-    return _naclStreamEncoder
 
 def throttle ( bps ):
     "Throttles, but not quite how much you ask it to yet. FIXME"
@@ -746,13 +729,9 @@ def hammertime_server( ):
 
 
 @appendTo( CODECS )
-def hammertime_rh_server ( key=None, encodingSpec="words,sha1,13", model="random", filename="/usr/share/dict/words", *modelArgs ):
-
-    nacl_encoder = naclStreamEncoder(key)
-    nacl_decoder = naclStreamEncoder(key)
-
-    return hammertime_encoder | nacl_encoder | rh_encoder( encodingSpec, model, filename, *modelArgs ), \
-        rh_decoder( encodingSpec ) | nacl_decoder | hammertime_decoder
+def hammertime_rh_server ( encodingSpec="words,sha1,13", model="random", filename="/usr/share/dict/words", *modelArgs ):
+    return hammertime_encoder | rh_encoder( encodingSpec, model, filename, *modelArgs ), \
+           rh_decoder( encodingSpec ) | hammertime_decoder
 
 
 class usage ( composable ):
@@ -765,18 +744,8 @@ class usage ( composable ):
                 raise
         composable.__init__( self, _command )
 
+def _buildTwistedProxyProtocolFactory( destHostPort, codecName, *args ):
 
-@register( COMMANDS, 'tcp_proxy' )
-@usage
-def tcp_proxy ( listenPort, destHostPort, codecName, *args ):
-    """
-    listenPort   - TCP port number to listen on
-    destHostPort - host:port to connect to
-    codecName    - name of encoder/decoder pair to use
-    codecArgs    - codec parameters
-    """
-
-    from twisted.protocols import basic
     from twisted.internet  import reactor, protocol, defer
 
     def callFromThreadWrapper( fn ):
@@ -791,6 +760,7 @@ def tcp_proxy ( listenPort, destHostPort, codecName, *args ):
 
         def connectionLost(self, why):
             debug( "Connection lost." )
+            self.byteSink.close()
             self.loseRemoteConnection()
 
 
@@ -845,9 +815,35 @@ def tcp_proxy ( listenPort, destHostPort, codecName, *args ):
     codec = GLOBALS.get( codecName )
     assert codec in CODECS, "codec must be one of %s, got %s" % ( formatGlobalNames( CODECS ), codecName )
     
-    reactor.listenTCP( int(listenPort), ProxyServerFactory( destHostPort, codec(*args) ) )
+    return ProxyServerFactory( destHostPort, codec(*args) )
+
+
+@register( COMMANDS, 'tcp_proxy' )
+@usage
+def tcp_proxy ( listenPort, destHostPort, codecName, *args ):
+    """
+    listenPort   - TCP port number to listen on
+    destHostPort - host:port to connect to
+    codecName    - name of encoder/decoder pair to use
+    codecArgs    - codec parameters
+    """
+    from twisted.internet import reactor
+    factory = _buildTwistedProxyProtocolFactory( destHostPort, codecName, *args )
+    reactor.listenTCP( int(listenPort), factory )
     reactor.run()
 
+@register( COMMANDS, 'tcp_client' )
+@usage
+def tcp_client ( destHostPort, codecName, *args ):
+    """
+    destHostPort - host:port to connect to
+    codecName    - name of encoder/decoder pair to use
+    codecArgs    - codec parameters
+    """
+    from twisted.internet import reactor, stdio
+    factory = _buildTwistedProxyProtocolFactory( destHostPort, codecName, *args )
+    stdio.StandardIO( factory.buildProtocol(None) )
+    reactor.run()
 
 @register( COMMANDS, 'test' )
 def test( verbose=None ):
