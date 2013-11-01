@@ -5,7 +5,6 @@ import obfsproxy.common.log as logging
 from obfsproxy.network.buffer import Buffer
 
 
-import nacl
 from bananaphone import hammertime_rh_server
 
 
@@ -13,19 +12,38 @@ log = logging.get_obfslogger()
 
 class BananaPhoneBuffer(object):
 
-    def __init__(self, corpusFilename=None):
+    def __init__(self, corpusFilename=None, encodingSpec=None, modelName=None, order=None, abridged=None):
+        self.corpusFilename   = corpusFilename
+        self.encodingSpec     = encodingSpec
+        self.modelName        = modelName
+        self.order            = order
+        self.abridged         = abridged
+
         self.output_bytes     = Buffer()
         self.output_words     = Buffer()
-        self.encodingSpec     = 'words,sha1,4'
-        self.modelName        = 'markov'
-        self.corpusFilename   = corpusFilename
 
-        self.key = nacl.randombytes(nacl.crypto_stream_KEYBYTES)
+        # BUG: modify bananaphone.py to
+        # accept the abridged arg as boolean?
+        if self.abridged:
+            self.abridged = '--abridged'
+        else:
+            self.abridged = None
 
-        (self.encoder, self.decoder) = hammertime_rh_server(key          = self.key,
-                                                            encodingSpec = self.encodingSpec, 
+        if self.modelName == 'markov':
+            args = { 'corpusFilename' : corpusFilename,
+                     'order'          : order,
+                     'abridged'       : abridged
+                     }
+
+        elif self.modelName == 'random':
+            args = {}
+        else:
+            # Todo: print an error message?
+            pass
+
+        (self.encoder, self.decoder) = hammertime_rh_server(encodingSpec = self.encodingSpec, 
                                                             model        = self.modelName,
-                                                            filename     = self.corpusFilename)
+                                                            **args)
 
         self.encoder = self.encoder > self.wordSinkToBuffer
         self.decoder = self.decoder > self.byteSinkToBuffer
@@ -52,16 +70,11 @@ class BananaphoneTransport(BaseTransport):
     
     def __init__(self, transport_config):
 
-        transport_options = transport_config.getServerTransportOptions()
-        if transport_options and 'corpus' in transport_options:
-            log.debug("Setting corpus from server transport options: '%s'", transport_options['corpus'])
-            self.corpus = transport_options['corpus']
-
-        if not hasattr(self, 'corpus'):
-            self.corpus = '/usr/share/dict/words'
-            log.debug("Setting corpus to default: '%s'", self.corpus)
-
-        self.bananaBuffer = BananaPhoneBuffer(corpusFilename=self.corpus)
+        self.bananaBuffer = BananaPhoneBuffer(corpusFilename = self.corpus,
+                                              encodingSpec   = self.encodingSpec,
+                                              modelName      = self.modelName,
+                                              order          = self.order,
+                                              abridged       = self.abridged)
 
     def receivedDownstream(self, data, circuit):
         circuit.upstream.write(self.bananaBuffer.transcribeFrom(data.read()))
@@ -73,13 +86,21 @@ class BananaphoneTransport(BaseTransport):
 
     @classmethod
     def register_external_mode_cli(cls, subparser):
-        subparser.add_argument('--corpus', type=str, help='Corpus file of words')
+        subparser.add_argument('--corpus', type=str, default='/usr/share/dict/words', help='Corpus file of words')
+        subparser.add_argument('--encoding_spec', type=str, default='words,sha1,4', dest='encodingSpec', help='reverse hash encoding specification')
+        subparser.add_argument('--model', type=str, default='markov', dest='modelName')
+        subparser.add_argument('--order', type=int, default=1)
+        subparser.add_argument('--abridged', action='store_true', default=False,)
+
         super(BananaphoneTransport, cls).register_external_mode_cli(subparser)
 
     @classmethod
     def validate_external_mode_cli(cls, args):
-        if args.corpus:
-            cls.corpus = args.corpus
+        cls.corpus       = args.corpus
+        cls.encodingSpec = args.encodingSpec
+        cls.modelName    = args.modelName
+        cls.order        = args.order
+        cls.abridged     = args.abridged
         super(BananaphoneTransport, cls).validate_external_mode_cli(args)
 
 

@@ -374,7 +374,7 @@ words3 = appendTo(TOKENIZERS)( streamTokenizer( " \n.,;?!" )
 MODELS = []
 
 @appendTo(MODELS)
-def markov ( tokenize, hash, bits, corpusFilename, order=1, abridged=None ):
+def markov ( tokenize, hash, bits, corpusFilename=None, order=1, abridged=None ):
     truncatedHash = truncateHash( hash, bits )
     corpusTokens  = list( tokenize < readTextFile( corpusFilename ) )
     order         = int( order )
@@ -389,9 +389,6 @@ def markov ( tokenize, hash, bits, corpusFilename, order=1, abridged=None ):
         incompleteStates  = len(model) - len(abridgedMarkovModel)
         debug( "%s states which lead to incomplete hash spaces will not be used." % ( incompleteStates, ) )
         model = abridgedMarkovModel
-
-    else:
-        assert abridged == None, "Unrecognized option: %s" % ( abridged, )
 
     class stats:
         total   = 0
@@ -454,14 +451,14 @@ def rh_decoder ( encodingSpec ):
 
 
 @appendTo(PIPELINES)
-def rh_encoder ( encodingSpec, modelName, *args ):
+def rh_encoder ( encodingSpec, modelName, **args ):
 
     tokenize, hash, bits = parseEncodingSpec( encodingSpec )
 
     model = GLOBALS.get( modelName )
     assert model in MODELS, "model must be one of %s, got %s" % ( formatGlobalNames( MODELS ), modelName )
 
-    encode = model( tokenize, hash, bits, *args )
+    encode = model( tokenize, hash, bits, **args )
     
     return toBytes | cmap(ord) | changeWordSize(8, bits) | cmap(encode)
 
@@ -729,8 +726,8 @@ def hammertime_server( ):
 
 
 @appendTo( CODECS )
-def hammertime_rh_server ( encodingSpec="words,sha1,13", model="random", filename="/usr/share/dict/words", *modelArgs ):
-    return hammertime_encoder | rh_encoder( encodingSpec, model, filename, *modelArgs ), \
+def hammertime_rh_server ( encodingSpec="words,sha1,13", model="random", filename="/usr/share/dict/words", **modelArgs ):
+    return hammertime_encoder | rh_encoder( encodingSpec, model, **modelArgs ), \
            rh_decoder( encodingSpec ) | hammertime_decoder
 
 
