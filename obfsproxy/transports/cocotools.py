@@ -102,14 +102,14 @@ class QueueCoroutine ( coroutine ):
     If you'd like your coroutine in the other process to be able to do something
     while waiting for data, you can access the queue directly instead of
     yielding for input by decorating your function with
-    co{Thread,Process}WithQueueAccess. In this case, your function must take
+    co{Thread,Process}.withQueueAccess. In this case, your function must take
     two arguments (queue, target) and can then poll the queue with non-blocking
     or blocking-with-timeout calls to get().
 
     Note: the below doctest is somewhat fragile and will probably only pass if
     your computer wins/loses a race condition the same way as mine usually does.
 
-    >>> @coProcessWithQueueAccess # also works with coThreadWithQueueAccess
+    >>> @coProcess.withQueueAccess # also works with coThread
     ... def countdown( queue, target ):
     ...   for i in range(5, 0,-1):
     ...     try:
@@ -155,7 +155,7 @@ class QueueCoroutine ( coroutine ):
                             break
                         target.send( value )
             def _queueWriter ( target ):
-                queue = self.Queue( 1000 )
+                queue = self.Queue( 10 )
                 p = self.ThreadOrProcess( target=_queueReader, args=(queue, target) )
                 p.start()
                 while True:
@@ -166,6 +166,10 @@ class QueueCoroutine ( coroutine ):
                         break
             coroutine.__init__( self, _queueWriter )
 
+    @classmethod
+    def withQueueAccess( cls, fn ):
+        return cls( fn, withQueueAccess = True )
+
     def __lt__ ( self, iterable ):
         """
         Turn concurrent coroutine into a normal generator, pulling from another
@@ -173,7 +177,7 @@ class QueueCoroutine ( coroutine ):
         process; the concurrent coroutine (including anything after it in a
         pipeline) is not.
         """
-        results = self.Queue( )
+        results = self.Queue( 10 )
         target = self > results.put
         for value in iterable:
             target.send( value )
@@ -189,16 +193,10 @@ class coProcess ( QueueCoroutine ):
     Queue           = staticmethod( multiprocessing.Queue   )
     ThreadOrProcess = staticmethod( multiprocessing.Process )
 
-def coProcessWithQueueAccess ( fn ):
-    return coProcess( fn, withQueueAccess = True )
-
 class coThread ( QueueCoroutine ):
     "QueueCoroutine using threading"
     Queue           = staticmethod( Queue.Queue      )
     ThreadOrProcess = staticmethod( threading.Thread )
-
-def coThreadWithQueueAccess ( fn ):
-    return coThread( fn, withQueueAccess = True )
 
 def tee ( targetOne ):
     @coroutine
