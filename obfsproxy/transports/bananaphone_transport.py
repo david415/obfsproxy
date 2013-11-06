@@ -4,7 +4,7 @@ from obfsproxy.transports.base import BaseTransport
 import obfsproxy.common.log as logging
 from obfsproxy.network.buffer import Buffer
 
-from bananaphone import rh_decoder, rh_encoder
+from bananaphone import rh_decoder, rh_encoder, parseEncodingSpec, buildWeightedRandomModel, truncateHash, readTextFile, markov
 
 
 log = logging.get_obfslogger()
@@ -12,6 +12,9 @@ log = logging.get_obfslogger()
 class BananaPhoneBuffer(object):
 
     def __init__(self, corpusFilename=None, encodingSpec=None, modelName=None, order=None, abridged=None):
+
+        log.debug("BananaPhoneBuffer: __init__")
+
         self.corpusFilename   = corpusFilename
         self.encodingSpec     = encodingSpec
         self.modelName        = modelName
@@ -28,15 +31,26 @@ class BananaPhoneBuffer(object):
         else:
             self.abridged = None
 
-        if self.modelName == 'markov':
-            args = [ self.corpusFilename, self.order, self.abridged ]
-        elif self.modelName == 'random':
-            args = [ self.corpusFilename ]
-        else:
-            # Todo: print an error message?
-            pass
+        self.tokenize, self.hash, self.bits = parseEncodingSpec(self.encodingSpec)
 
-        self.encoder = rh_encoder(self.encodingSpec, self.modelName, *args) > self.wordSinkToBuffer
+        log.debug("BananaPhoneBuffer: creating %s model" % self.modelName)
+
+        if self.modelName == 'markov':
+            args = { 'corpusFilename': self.corpusFilename,
+                     'order': self.order,
+                     'abridged': self.abridged }
+
+            self.model = markov ( self.tokenize, self.hash, self.bits, corpusFilename=self.corpusFilename, order=self.order, abridged=self.abridged )
+        elif self.modelName == 'random':
+            args = { 'corpusFilename': self.corpusFilename }
+            self.corpusTokens   = list( self.tokenize < readTextFile( self.corpusFilename ) )
+            self.truncatedHash  = truncateHash(self.hash, self.bits)
+            self.model = buildWeightedRandomModel(self.corpusTokens, self.truncatedHash)
+        else:
+            log.info("BananaPhoneBuffer: invalid model")
+            return None
+
+        self.encoder = rh_encoder(encodingSpec=self.encodingSpec, model=self.model, **args) > self.wordSinkToBuffer
         self.decoder = rh_decoder(self.encodingSpec) > self.byteSinkToBuffer
 
 

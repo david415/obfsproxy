@@ -17,7 +17,7 @@ class test_BananaPhoneBuffer(twisted.trial.unittest.TestCase):
         #    bytes.append(chr(i))
         #cls.seed_str = "".join(bytes)
 
-        cls.bananaBuffer = BananaPhoneBuffer()
+        cls.bananaBuffer = BananaPhoneBuffer(corpusFilename='/usr/share/dict/words', encodingSpec='words,sha1,4', modelName='markov', order=1)
         cls.result1 = cls.bananaBuffer.transcribeTo(cls.seed_str)
 
     def test_1(self):

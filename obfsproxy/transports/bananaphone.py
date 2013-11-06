@@ -370,7 +370,7 @@ words3 = appendTo(TOKENIZERS)( streamTokenizer( " \n.,;?!" )
 MODELS = []
 
 @appendTo(MODELS)
-def markov ( tokenize, hash, bits, corpusFilename, order=1, abridged=None ):
+def markov ( tokenize, hash, bits, corpusFilename=None, order=1, abridged=None ):
     truncatedHash = truncateHash( hash, bits )
     corpusTokens  = list( tokenize < readTextFile( corpusFilename ) )
     order         = int( order )
@@ -425,7 +425,7 @@ def markov ( tokenize, hash, bits, corpusFilename, order=1, abridged=None ):
 
 
 @appendTo(MODELS)
-def random ( tokenize, hash, bits, corpusFilename ):
+def random ( tokenize=None, hash=None, bits=None, corpusFilename=None ):
 
     truncatedHash = truncateHash( hash, bits )
     corpusTokens  = list( tokenize < readTextFile( corpusFilename ) )
@@ -450,15 +450,18 @@ def rh_decoder ( encodingSpec ):
 
 
 @appendTo(PIPELINES)
-def rh_encoder ( encodingSpec, modelName, *args ):
+def rh_encoder ( encodingSpec=None, model=None, modelName=None, **args ):
+    assert (model is not None) or (modelName is not None)
 
     tokenize, hash, bits = parseEncodingSpec( encodingSpec )
+    if model is None:
+        model = GLOBALS.get( modelName )
+        assert model in MODELS, "model must be one of %s, got %s" % ( formatGlobalNames( MODELS ), modelName )
+        encode = model( tokenize, hash, bits, **args )
+    else:
+        print "using passed in model"
+        encode = model
 
-    model = GLOBALS.get( modelName )
-    assert model in MODELS, "model must be one of %s, got %s" % ( formatGlobalNames( MODELS ), modelName )
-
-    encode = model( tokenize, hash, bits, *args )
-    
     return toBytes | cmap(ord) | changeWordSize(8, bits) | cmap(encode)
 
 COMMANDS = {}
