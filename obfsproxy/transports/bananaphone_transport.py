@@ -40,7 +40,13 @@ class BananaPhoneBuffer(object):
                      'order': self.order,
                      'abridged': self.abridged }
 
-            self.model = markov ( self.tokenize, self.hash, self.bits, corpusFilename=self.corpusFilename, order=self.order, abridged=self.abridged )
+            self.model = markov ( self.tokenize,
+                                  self.hash,
+                                  self.bits,
+                                  corpusFilename = self.corpusFilename,
+                                  order = self.order,
+                                  abridged = self.abridged )
+
         elif self.modelName == 'random':
             args = { 'corpusFilename': self.corpusFilename }
             self.corpusTokens   = list( self.tokenize < readTextFile( self.corpusFilename ) )
@@ -74,12 +80,7 @@ class BananaPhoneBuffer(object):
 class BananaphoneTransport(BaseTransport):
     
     def __init__(self, transport_config):
-
-        self.bananaBuffer = BananaPhoneBuffer(corpusFilename = self.corpus,
-                                              encodingSpec   = self.encodingSpec,
-                                              modelName      = self.modelName,
-                                              order          = self.order,
-                                              abridged       = self.abridged)
+        pass
 
     def receivedDownstream(self, data, circuit):
         circuit.upstream.write(self.bananaBuffer.transcribeFrom(data.read()))
@@ -90,7 +91,21 @@ class BananaphoneTransport(BaseTransport):
         return
 
     @classmethod
+    def setup(cls):
+        print "my setup!"
+        print cls.__dict__.keys()
+
+        cls.bananaBuffer = BananaPhoneBuffer(corpusFilename = cls.corpus,
+                                             encodingSpec   = cls.encodingSpec,
+                                             modelName      = cls.modelName,
+                                             order          = cls.order,
+                                             abridged       = cls.abridged)
+
+    @classmethod
     def register_external_mode_cli(cls, subparser):
+
+        log.debug("register_external_mode_cli")
+
         subparser.add_argument('--corpus', type=str, default='/usr/share/dict/words', help='Corpus file of words')
         subparser.add_argument('--encoding_spec', type=str, default='words,sha1,4', dest='encodingSpec', help='reverse hash encoding specification')
         subparser.add_argument('--model', type=str, default='markov', dest='modelName')
@@ -101,6 +116,9 @@ class BananaphoneTransport(BaseTransport):
 
     @classmethod
     def validate_external_mode_cli(cls, args):
+
+        log.debug("validate_external_mode_cli")
+
         cls.corpus       = args.corpus
         cls.encodingSpec = args.encodingSpec
         cls.modelName    = args.modelName
