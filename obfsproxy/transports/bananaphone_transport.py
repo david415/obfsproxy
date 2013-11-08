@@ -60,12 +60,15 @@ class BananaPhoneBuffer(object):
 class BananaphoneTransport(BaseTransport):
     
     def __init__(self, transport_config):
+        pass
 
-        self.bananaBuffer = BananaPhoneBuffer(corpusFilename = self.corpus,
-                                              encodingSpec   = self.encodingSpec,
-                                              modelName      = self.modelName,
-                                              order          = self.order,
-                                              abridged       = self.abridged)
+    @classmethod
+    def setup(cls):
+        cls.bananaBuffer = BananaPhoneBuffer(corpusFilename = cls.corpus,
+                                             encodingSpec   = cls.encodingSpec,
+                                             modelName      = cls.modelName,
+                                             order          = cls.order,
+                                             abridged       = cls.abridged)
 
     def receivedDownstream(self, data, circuit):
         circuit.upstream.write(self.bananaBuffer.transcribeFrom(data.read()))

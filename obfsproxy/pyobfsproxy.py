@@ -108,6 +108,10 @@ def consider_cli_args(args):
         # managed proxies without a logfile must not log at all.
         log.disable_logs()
 
+def run_transport_setup():
+    for transport, transport_class in transports.transports.items():
+        transport_class['base'].setup()
+
 def pyobfsproxy():
     """Actual pyobfsproxy entry-point."""
     parser = set_up_cli_parsing()
@@ -137,6 +141,7 @@ def pyobfsproxy():
         if (args.validation_function(args) == False):
             sys.exit(1)
 
+        run_transport_setup()
         do_external_mode(args)
 
 def run():
