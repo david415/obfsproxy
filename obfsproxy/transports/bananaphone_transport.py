@@ -33,8 +33,8 @@ class BananaPhoneBuffer(object):
         elif self.modelName == 'random':
             args = [ self.corpusFilename ]
         else:
-            # Todo: print an error message?
-            pass
+            log.error("BananaPhoneBuffer: unsupported model type")
+            return
 
         self.encoder = rh_encoder(self.encodingSpec, self.modelName, *args) > self.wordSinkToBuffer
         self.decoder = rh_decoder(self.encodingSpec) > self.byteSinkToBuffer
@@ -63,12 +63,39 @@ class BananaphoneTransport(BaseTransport):
         pass
 
     @classmethod
-    def setup(cls):
+    def setup(cls, transport_config):
+
+        log.debug("BananaphoneTransport: setup")
+
+        if transport_config is not None:
+            transport_options = transport_config.getServerTransportOptions()
+            if transport_options:
+                log.debug("transport_options")
+                for key in transport_options.keys():
+                    cls[key] = transport_options[key]
+                    log.debug("key %s value %" % (key, transport_options[key]))
+            else:
+                log.debug("transport_options is None")
+        else:
+            log.debug("transport_config is None")
+
+        if not hasattr(cls, 'corpus'):
+            cls.corpus       = '/usr/share/dict/words'
+        if not hasattr(cls, 'encodingSpec'):
+            cls.encodingSpec = 'words,sha1,4'
+        if not hasattr(cls, 'modelName'):
+            cls.modelName    = 'markov'
+        if not hasattr(cls, 'order'):
+            cls.order        = 1
+        if not hasattr(cls, 'abridged'):
+            cls.abridged     = False
+
         cls.bananaBuffer = BananaPhoneBuffer(corpusFilename = cls.corpus,
                                              encodingSpec   = cls.encodingSpec,
                                              modelName      = cls.modelName,
                                              order          = cls.order,
                                              abridged       = cls.abridged)
+
 
     def receivedDownstream(self, data, circuit):
         circuit.upstream.write(self.bananaBuffer.transcribeFrom(data.read()))

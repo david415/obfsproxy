@@ -110,7 +110,7 @@ def consider_cli_args(args):
 
 def run_transport_setup():
     for transport, transport_class in transports.transports.items():
-        transport_class['base'].setup()
+        transport_class['base'].setup(None)
 
 def pyobfsproxy():
     """Actual pyobfsproxy entry-point."""
