@@ -69,7 +69,7 @@ class BaseTransport(object):
         pass
 
     @classmethod
-    def setup(cls):
+    def setup(cls, transport_config):
         """
         Perform setup task for transport. Save state in class attributes...
         """
