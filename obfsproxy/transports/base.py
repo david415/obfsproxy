@@ -81,14 +81,6 @@ class BaseTransport(object):
         pass
 
     @classmethod
-    def setup(cls, transport_config):
-        """
-        Perform setup task for transport. Save state in class attributes...
-        """
-        pass
-
-
-    @classmethod
     def register_external_mode_cli(cls, subparser):
         """
         Given an argparse ArgumentParser in 'subparser', register

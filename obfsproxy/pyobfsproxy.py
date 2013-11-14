@@ -115,10 +115,6 @@ def run_transport_setup(pt_config):
     for transport, transport_class in transports.transports.items():
         transport_class['base'].setup(pt_config)
 
-def run_transport_setup():
-    for transport, transport_class in transports.transports.items():
-        transport_class['base'].setup(None)
-
 def pyobfsproxy():
     """Actual pyobfsproxy entry-point."""
     parser = set_up_cli_parsing()
@@ -148,7 +144,6 @@ def pyobfsproxy():
         if (args.validation_function(args) == False):
             sys.exit(1)
 
-        run_transport_setup()
         do_external_mode(args)
 
 def run():

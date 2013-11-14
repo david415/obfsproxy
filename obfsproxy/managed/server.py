@@ -42,9 +42,6 @@ def do_managed_server():
 
         transport_options = ""
 
-        transport_class = transports.get_transport_class(transport, 'socks')
-        transport_class.setup(pt_config)
-
         if server_transport_options and transport in server_transport_options:
             transport_options = server_transport_options[transport]
             pt_config.setServerTransportOptions(transport_options)

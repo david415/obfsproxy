@@ -39,9 +39,6 @@ def do_managed_client():
         transport_class = transports.get_transport_class(transport, 'socks')
         transport_class.setup(pt_config)
 
-        transport_class = transports.get_transport_class(transport, 'socks')
-        transport_class.setup(pt_config)
-
         try:
             addrport = launch_transport.launch_transport_listener(transport, None, 'socks', None, pt_config)
         except transports.TransportNotFound:
