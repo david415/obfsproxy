@@ -65,16 +65,10 @@ class BananaphoneTransport(BaseTransport):
     @classmethod
     def setup(cls, transport_config):
 
-        log.debug("BananaphoneTransport setup")
-
         transport_options = transport_config.getServerTransportOptions()
         if transport_options:
-            log.debug("transport_options")
             for key in transport_options.keys():
-                cls[key] = transport_options[key]
-                log.notice("BananaphoneTransport setup: key %s value %" % (key, transport_options[key]))
-        else:
-            log.debug("BananaphoneTransport setup: transport_options is None")
+                setattr(cls, key, transport_options[key])
 
         if not hasattr(cls, 'corpus'):
             cls.corpus       = '/usr/share/dict/words'
