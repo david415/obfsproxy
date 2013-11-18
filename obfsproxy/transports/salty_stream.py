@@ -16,51 +16,58 @@ log = logging.get_obfslogger()
 class SaltyStreamTransport(BaseTransport):
     
     def __init__(self, transport_config):
-        self.downstreamCounter = 0
-        self.upstreamCounter   = 0
+        self.downstream_counter = 0
+        self.upstream_counter   = 0
 
     @classmethod
     def setup(cls, transport_config):
         """Setup the salty stream pluggable transport."""
-        if not hasattr(cls, 'shared_secret'):
+        if not hasattr(cls, 'upstream_shared_secret') or not hasattr(cls, 'downstream_shared_secret'):
             # Check for shared-secret in the server transport options.
             transport_options = transport_config.getServerTransportOptions()
-            if transport_options and "shared-secret" in transport_options:
-                log.debug("Setting shared-secret from server transport options: '%s'", transport_options["shared-secret"])
-                cls.shared_secret = binascii.a2b_hex(transport_options["shared-secret"])
 
-            else:
-                log.error("Cannot start salty stream without shared secret")
-                sys.exit(0)
+            log.debug("Setting upstream shared-secret from server transport options: '%s'", transport_options["upstream-shared-secret"])
+            log.debug("Setting downstream shared-secret from server transport options: '%s'", transport_options["downstream-shared-secret"])
+
+            cls.upstream_shared_secret = binascii.a2b_hex(transport_options["upstream-shared-secret"])
+            cls.downstream_shared_secret = binascii.a2b_hex(transport_options["downstream-shared-secret"])
         else:
-            cls.shared_secret = binascii.a2b_hex(cls.shared_secret)
+            cls.upstream_shared_secret = binascii.a2b_hex(cls.upstream_shared_secret)
+            cls.downstream_shared_secret = binascii.a2b_hex(cls.downstream_shared_secret)
 
-        log.info("SaltyStream setup: shared-secret %s" % binascii.b2a_hex(cls.shared_secret))
+        log.info("SaltyStream setup: upstream-shared-secret %s" % binascii.b2a_hex(cls.upstream_shared_secret))
+        log.info("SaltyStream setup: downstream-shared-secret %s" % binascii.b2a_hex(cls.downstream_shared_secret))
 
     def receivedDownstream(self, data, circuit):
+        log.debug("receivedDownstream counter %s" % self.downstream_counter)
+
         # BUG: count with all the bits
-        nonce      = pack('LLL', 0,0,self.downstreamCounter)
-        cipherText = nacl.crypto_stream_xor(data.read(), nonce, self.shared_secret)
+        nonce      = pack('LLL', 0,0,self.downstream_counter)
+        cipherText = nacl.crypto_stream_xor(data.read(), nonce, self.downstream_shared_secret)
+        self.downstream_counter += 1
         circuit.upstream.write(cipherText)
-        self.downstreamCounter += 1
         return
 
     def receivedUpstream(self, data, circuit):
+        log.debug("receivedUpstream counter %s" % self.upstream_counter)
+
         # BUG: count with all the bits
-        nonce     = pack('LLL', 0,0,self.upstreamCounter)
-        plainText = nacl.crypto_stream_xor(data.read(), nonce, self.shared_secret)
+        nonce     = pack('LLL', 0,0,self.upstream_counter)
+        plainText = nacl.crypto_stream_xor(data.read(), nonce, self.upstream_shared_secret)
+        self.upstream_counter += 1
         circuit.downstream.write(plainText)
-        self.upstreamCounter += 1
         return
 
     @classmethod
     def register_external_mode_cli(cls, subparser):
-        subparser.add_argument('--shared-secret', type=str, default='abc123', help='shared secret for nacl stream encoder/decoder')
+        subparser.add_argument('--upstream-shared-secret', type=str, default='deadbeef8457a76eee0acf4e0158f5861ddbb8ad2728c9ad201686d3d654537e', help='shared secret for upstream nacl stream encoder/decoder')
+        subparser.add_argument('--downstream-shared-secret', type=str, default='deadface537b43e6a0f5e18314ff4d2a830f6187ac4216412ba6bb5dc3bded40', help='shared secret for downstream nacl stream encoder/decoder')
         super(SaltyStreamTransport, cls).register_external_mode_cli(subparser)
 
     @classmethod
     def validate_external_mode_cli(cls, args):
-        cls.shared_secret = args.shared_secret
+        cls.upstream_shared_secret = args.upstream_shared_secret
+        cls.downstream_shared_secret = args.downstream_shared_secret
         super(SaltyStreamTransport, cls).validate_external_mode_cli(args)
 
 
