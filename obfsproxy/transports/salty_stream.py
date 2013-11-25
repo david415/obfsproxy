@@ -17,7 +17,6 @@ class SaltyStreamBuffer( object ):
     """
     encrypts/decrypts Salty Stream messages
     """
-    HEADER_LEN = 4
 
     def __init__(self, shared_secret = None):
         self.sharedSecret = shared_secret
@@ -32,32 +31,13 @@ class SaltyStreamBuffer( object ):
         self.counter += 1
         return output
 
-    def encrypt(self, data):
+    def encode(self, data):
+        """Encrypt or decrypt one byte at a time."""
         output = Buffer()
-        packed_len = pack('i', len(data))
-        output.write(packed_len)
-        cipherText = self.streamCrypt(data.read())
-        output.write(cipherText)
+        for _byte in data.read():
+            encoding = self.streamCrypt(_byte)
+            output.write(encoding)
         return output.read()
-
-    def decrypt(self, data):
-        output = Buffer()
-        self.messageBuf.write(data.read())
-
-        while len(self.messageBuf) >= self.HEADER_LEN:
-            if self.payloadLen is None:
-                self.payloadLen = unpack("i", str(self.messageBuf.read(self.HEADER_LEN)))[0]
-
-            if len(self.messageBuf) < self.payloadLen:
-                break
-
-            output.write(self.streamCrypt(self.messageBuf.read(self.payloadLen)))
-            self.payloadLen = None
-
-        if len(output) == 0:
-            return None
-        else:
-            return output.read()
 
 
 class SaltyStreamTransport(BaseTransport):
@@ -90,13 +70,13 @@ class SaltyStreamTransport(BaseTransport):
         log.info("SaltyStream setup: downstream-shared-secret %s" % binascii.b2a_hex(cls.downstream_shared_secret))
 
     def receivedDownstream(self, data, circuit):
-        plainText = self.downstreamSaltyStreamBuffer.decrypt(data)
+        plainText = self.downstreamSaltyStreamBuffer.encode(data)
         if plainText is not None:
             circuit.upstream.write(plainText)
         return
 
     def receivedUpstream(self, data, circuit):
-        cipherText = self.upstreamSaltyStreamBuffer.encrypt(data)
+        cipherText = self.upstreamSaltyStreamBuffer.encode(data)
         circuit.downstream.write(cipherText)
         return
         
