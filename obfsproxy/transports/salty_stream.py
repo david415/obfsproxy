@@ -63,8 +63,8 @@ class SaltyStreamBuffer( object ):
 class SaltyStreamTransport(BaseTransport):
     
     def __init__(self, transport_config):
-        self.downstreamMessageExtractor = SaltyStreamBuffer(shared_secret = self.downstream_shared_secret)
-        self.upstreamMessageExtractor   = SaltyStreamBuffer(shared_secret = self.upstream_shared_secret)
+        self.downstreamSaltyStreamBuffer = SaltyStreamBuffer(shared_secret = self.downstream_shared_secret)
+        self.upstreamSaltyStreamBuffer   = SaltyStreamBuffer(shared_secret = self.upstream_shared_secret)
 
     @classmethod
     def setup(cls, transport_config):
@@ -90,13 +90,13 @@ class SaltyStreamTransport(BaseTransport):
         log.info("SaltyStream setup: downstream-shared-secret %s" % binascii.b2a_hex(cls.downstream_shared_secret))
 
     def receivedDownstream(self, data, circuit):
-        plainText = self.downstreamMessageExtractor.decrypt(data)
+        plainText = self.downstreamSaltyStreamBuffer.decrypt(data)
         if plainText is not None:
             circuit.upstream.write(plainText)
         return
 
     def receivedUpstream(self, data, circuit):
-        cipherText = self.upstreamMessageExtractor.encrypt(data)
+        cipherText = self.upstreamSaltyStreamBuffer.encrypt(data)
         circuit.downstream.write(cipherText)
         return
         
