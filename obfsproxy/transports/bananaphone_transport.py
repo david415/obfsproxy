@@ -70,6 +70,7 @@ class BananaphoneTransport(BaseTransport):
             for key in transport_options.keys():
                 setattr(cls, key, transport_options[key])
 
+        # default transport options
         if not hasattr(cls, 'corpus'):
             cls.corpus       = '/usr/share/dict/words'
         if not hasattr(cls, 'encodingSpec'):
@@ -87,6 +88,14 @@ class BananaphoneTransport(BaseTransport):
                                              order          = cls.order,
                                              abridged       = cls.abridged)
 
+    @classmethod
+    def get_public_options(cls, transport_options):
+        # make encodingSpec transport option public
+        # if not specified then use the default value
+        if 'encodingSpec' not in transport_options:
+            return dict(encodingSpec = cls.encodingSpec)
+        else:
+            return dict(encodingSpec = transport_options['encodingSpec'])
 
     def receivedDownstream(self, data, circuit):
         circuit.upstream.write(self.bananaBuffer.transcribeFrom(data.read()))
