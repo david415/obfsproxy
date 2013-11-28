@@ -79,10 +79,24 @@ def do_managed_server():
             extra_log = " (server transport options: '%s')" % str(transport_options)
         log.debug("Successfully launched '%s' at '%s'%s" % (transport, log.safe_addr_str(str(addrport)), extra_log))
 
+        # Potentially filter the transport options
+        # with the transport's get_public_options() method
+        public_options_dict = transport_class.get_public_options(transport_options)
+        public_options_str  = None
+
+        # if we have filter
+        if public_options_dict is not None:
+            optlist            = []
+            for k, v in public_options_dict.items():
+                optlist.append("%s=%s" % (k,v))
+            public_options_str = ",".join(optlist)
+
+            log.debug("do_managed_server: sending only public_options to tor: %s" % public_options_str)
+
         # Report success for this transport.
-        # (We leave the 'options' as None and let pyptlib handle the
-        # SMETHOD argument sending.)
-        ptserver.reportMethodSuccess(transport, addrport, None)
+        # If public_options_str is None then all of the
+        # transport options from ptserver are used instead.
+        ptserver.reportMethodSuccess(transport, addrport, public_options_str)
 
     ptserver.reportMethodsEnd()
 

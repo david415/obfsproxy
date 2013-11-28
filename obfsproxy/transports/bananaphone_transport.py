@@ -43,6 +43,10 @@ class BananaphoneTransport(BaseTransport):
         cls.encode = rh_encoder(cls.encodingSpec, cls.modelName, *args)
         cls.decode = rh_decoder(cls.encodingSpec)
 
+    @classmethod
+    def get_public_options(cls, transport_options):
+        return dict(encodingSpec = transport_options['encodingSpec'])
+
     def handshake(self, circuit):
         self.encoder = self.encode > circuit.downstream.write
         self.decoder = self.decode > circuit.upstream.write
