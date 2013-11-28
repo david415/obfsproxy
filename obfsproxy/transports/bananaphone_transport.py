@@ -54,12 +54,7 @@ class BananaphoneTransport(BaseTransport):
 
     @classmethod
     def get_public_options(cls, transport_options):
-        # make encodingSpec transport option public
-        # if not specified then use the default value
-        if 'encodingSpec' not in transport_options:
-            return dict(encodingSpec = cls.encodingSpec)
-        else:
-            return dict(encodingSpec = transport_options['encodingSpec'])
+        return dict(encodingSpec = transport_options['encodingSpec'])
 
     def handshake(self, circuit):
         self.encoder = self.encode > circuit.downstream.write
