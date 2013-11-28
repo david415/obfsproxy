@@ -22,14 +22,6 @@ class BananaphoneTransport(BaseTransport):
             for key in transport_options.keys():
                 setattr(cls, key, transport_options[key])
 
-        if not hasattr(cls, 'corpus'):
-            cls.corpus       = '/usr/share/dict/words'
-        if not hasattr(cls, 'encodingSpec'):
-            cls.encodingSpec = 'words,sha1,4'
-        if not hasattr(cls, 'modelName'):
-            cls.modelName    = 'markov'
-        if not hasattr(cls, 'order'):
-            cls.order        = 1
         if not hasattr(cls, 'abridged'):
             cls.abridged     = False
 
@@ -65,10 +57,10 @@ class BananaphoneTransport(BaseTransport):
 
     @classmethod
     def register_external_mode_cli(cls, subparser):
-        subparser.add_argument('--corpus', type=str, default='/usr/share/dict/words', help='Corpus file of words')
-        subparser.add_argument('--encoding_spec', type=str, default='words,sha1,4', dest='encodingSpec', help='reverse hash encoding specification')
-        subparser.add_argument('--model', type=str, default='markov', dest='modelName')
-        subparser.add_argument('--order', type=int, default=1)
+        subparser.add_argument('--corpus', type=str, help='Corpus file of words')
+        subparser.add_argument('--encoding_spec', type=str, dest='encodingSpec', help='reverse hash encoding specification')
+        subparser.add_argument('--model', type=str, dest='modelName')
+        subparser.add_argument('--order', type=int)
         subparser.add_argument('--abridged', action='store_true', default=False,)
 
         super(BananaphoneTransport, cls).register_external_mode_cli(subparser)
