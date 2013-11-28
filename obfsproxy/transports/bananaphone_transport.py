@@ -9,54 +9,6 @@ from bananaphone import rh_decoder, rh_encoder
 
 log = logging.get_obfslogger()
 
-class BananaPhoneBuffer(object):
-
-    def __init__(self, corpusFilename=None, encodingSpec=None, modelName=None, order=None, abridged=None):
-        self.corpusFilename   = corpusFilename
-        self.encodingSpec     = encodingSpec
-        self.modelName        = modelName
-        self.order            = order
-        self.abridged         = abridged
-
-        self.output_bytes     = Buffer()
-        self.output_words     = Buffer()
-
-        # BUG: modify bananaphone.py to
-        # accept the abridged arg as boolean?
-        if self.abridged:
-            self.abridged = '--abridged'
-        else:
-            self.abridged = None
-
-        if self.modelName == 'markov':
-            args = [ self.corpusFilename, self.order, self.abridged ]
-        elif self.modelName == 'random':
-            args = [ self.corpusFilename ]
-        else:
-            log.error("BananaPhoneBuffer: unsupported model type")
-            return
-
-        self.encoder = rh_encoder(self.encodingSpec, self.modelName, *args) > self.wordSinkToBuffer
-        self.decoder = rh_decoder(self.encodingSpec) > self.byteSinkToBuffer
-
-
-    def transcribeFrom(self, input):
-        for byte in input:
-            self.decoder.send(byte)
-        return self.output_bytes.read()
-
-    def transcribeTo(self, input):
-        for byte in input:
-            self.encoder.send(byte)
-        return self.output_words.read()
-
-    def wordSinkToBuffer(self, input):
-        self.output_words.write(input)
-
-    def byteSinkToBuffer(self, input):
-        self.output_bytes.write(input)
- 
-
 class BananaphoneTransport(BaseTransport):
     
     def __init__(self, transport_config):
@@ -64,7 +16,7 @@ class BananaphoneTransport(BaseTransport):
 
     @classmethod
     def setup(cls, transport_config):
-
+        
         transport_options = transport_config.getServerTransportOptions()
         if transport_options:
             for key in transport_options.keys():
@@ -82,11 +34,23 @@ class BananaphoneTransport(BaseTransport):
         if not hasattr(cls, 'abridged'):
             cls.abridged     = False
 
-        cls.bananaBuffer = BananaPhoneBuffer(corpusFilename = cls.corpus,
-                                             encodingSpec   = cls.encodingSpec,
-                                             modelName      = cls.modelName,
-                                             order          = cls.order,
-                                             abridged       = cls.abridged)
+        # BUG: modify bananaphone.py to
+        # accept the abridged arg as boolean?
+        if cls.abridged:
+            cls.abridged = '--abridged'
+        else:
+            cls.abridged = None
+
+        if cls.modelName == 'markov':
+            args = [ cls.corpus, cls.order, cls.abridged ]
+        elif cls.modelName == 'random':
+            args = [ cls.corpus ]
+        else:
+            log.error("BananaPhoneBuffer: unsupported model type")
+            return
+
+        cls.encode = rh_encoder(cls.encodingSpec, cls.modelName, *args)
+        cls.decode = rh_decoder(cls.encodingSpec)
 
     @classmethod
     def get_public_options(cls, transport_options):
@@ -97,12 +61,16 @@ class BananaphoneTransport(BaseTransport):
         else:
             return dict(encodingSpec = transport_options['encodingSpec'])
 
+    def handshake(self, circuit):
+        self.encoder = self.encode > circuit.downstream.write
+        self.decoder = self.decode > circuit.upstream.write
+
     def receivedDownstream(self, data, circuit):
-        circuit.upstream.write(self.bananaBuffer.transcribeFrom(data.read()))
+        self.decoder.send(data.read())
         return
 
     def receivedUpstream(self, data, circuit):
-        circuit.downstream.write(self.bananaBuffer.transcribeTo(data.read()))
+        self.encoder.send(data.read())
         return
 
     @classmethod
