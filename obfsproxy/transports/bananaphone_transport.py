@@ -14,8 +14,14 @@ class BananaphoneTransport(BaseTransport):
     def __init__(self, transport_config):
         pass
 
-    @classmethod
-    def setup_encoding_model(self):
+    def handle_socks_args(self, args):
+        if not args:
+            log.error("BananaphoneTransport: must specify server transport options")
+            return
+
+        for arg in args:
+            key,value = arg.split('=')
+            setattr(self, key, value)
 
         # BUG: modify bananaphone.py to
         # accept the abridged arg as boolean?
@@ -36,18 +42,6 @@ class BananaphoneTransport(BaseTransport):
         self.encode = rh_encoder(self.encodingSpec, self.modelName, *args)
         self.decode = rh_decoder(self.encodingSpec)
 
-    def handle_socks_args(self, args):
-        if args:
-            log.error("args %s" % args)
-
-            for arg in args:
-                key,value = arg.split('=')
-                setattr(self, key, value)
-
-            self.setup_encoding_model()
-        else:
-            log.error("BananaphoneTransport: must specify server transport options")
-
     @classmethod
     def setup(cls, transport_config):
 
@@ -57,12 +51,31 @@ class BananaphoneTransport(BaseTransport):
             return
 
         transport_options = transport_config.getServerTransportOptions()
-        if transport_options:
-            for key in transport_options.keys():
-                setattr(cls, key, transport_options[key])
-            cls.setup_encoding_model()
-        else:
+        if not transport_options:
             log.error("BananaphoneTransport: must specify server transport options")
+            return
+
+        for key in transport_options.keys():
+            setattr(cls, key, transport_options[key])
+
+       # BUG: modify bananaphone.py to
+        # accept the abridged arg as boolean?
+        if hasattr(cls,'abridged'):
+            cls.abridged = '--abridged'
+        else:
+            # this is the only transport option which has a default value
+            cls.abridged = None
+
+        if cls.modelName == 'markov':
+            args = [ cls.corpus, cls.order, cls.abridged ]
+        elif cls.modelName == 'random':
+            args = [ cls.corpus ]
+        else:
+            log.error("BananaphoneTransport: unsupported model type")
+            return
+
+        cls.encode = rh_encoder(cls.encodingSpec, cls.modelName, *args)
+        cls.decode = rh_decoder(cls.encodingSpec)
 
     @classmethod
     def get_public_options(cls, transport_options):
