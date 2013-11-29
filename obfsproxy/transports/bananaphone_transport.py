@@ -15,36 +15,59 @@ class BananaphoneTransport(BaseTransport):
         pass
 
     @classmethod
+    def setup_encoding_model(self):
+
+        # BUG: modify bananaphone.py to
+        # accept the abridged arg as boolean?
+        if hasattr(self,'abridged'):
+            self.abridged = '--abridged'
+        else:
+            # this is the only transport option which has a default value
+            self.abridged = None
+
+        if self.modelName == 'markov':
+            args = [ self.corpus, self.order, self.abridged ]
+        elif self.modelName == 'random':
+            args = [ self.corpus ]
+        else:
+            log.error("BananaphoneTransport: unsupported model type")
+            return
+
+        self.encode = rh_encoder(self.encodingSpec, self.modelName, *args)
+        self.decode = rh_decoder(self.encodingSpec)
+
+    def handle_socks_args(self, args):
+        if args:
+            log.error("args %s" % args)
+
+            for arg in args:
+                key,value = arg.split('=')
+                setattr(self, key, value)
+
+            self.setup_encoding_model()
+        else:
+            log.error("BananaphoneTransport: must specify server transport options")
+
+    @classmethod
     def setup(cls, transport_config):
-        
+
+        # if we are the client then we receive the transport options
+        # from handle_socks_args
+        if cls.initiator:
+            return
+
         transport_options = transport_config.getServerTransportOptions()
         if transport_options:
             for key in transport_options.keys():
                 setattr(cls, key, transport_options[key])
-
-        if not hasattr(cls, 'abridged'):
-            cls.abridged     = False
-
-        # BUG: modify bananaphone.py to
-        # accept the abridged arg as boolean?
-        if cls.abridged:
-            cls.abridged = '--abridged'
+            cls.setup_encoding_model()
         else:
-            cls.abridged = None
-
-        if cls.modelName == 'markov':
-            args = [ cls.corpus, cls.order, cls.abridged ]
-        elif cls.modelName == 'random':
-            args = [ cls.corpus ]
-        else:
-            log.error("BananaPhoneBuffer: unsupported model type")
-            return
-
-        cls.encode = rh_encoder(cls.encodingSpec, cls.modelName, *args)
-        cls.decode = rh_decoder(cls.encodingSpec)
+            log.error("BananaphoneTransport: must specify server transport options")
 
     @classmethod
     def get_public_options(cls, transport_options):
+        """ Only tell BridgeDB about our encodingSpec
+        """
         return dict(encodingSpec = transport_options['encodingSpec'])
 
     def handshake(self, circuit):
@@ -66,7 +89,6 @@ class BananaphoneTransport(BaseTransport):
         subparser.add_argument('--model', type=str, dest='modelName')
         subparser.add_argument('--order', type=int)
         subparser.add_argument('--abridged', action='store_true', default=False,)
-
         super(BananaphoneTransport, cls).register_external_mode_cli(subparser)
 
     @classmethod
@@ -80,8 +102,10 @@ class BananaphoneTransport(BaseTransport):
 
 
 class BananaphoneClient(BananaphoneTransport):
+    initiator = True
     pass
 
 class BananaphoneServer(BananaphoneTransport):
+    initiator = False
     pass
 
