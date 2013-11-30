@@ -1,0 +1,39 @@
+		Threat model for the bananaphone obfuscation protocol
+
+			       David Stainton
+
+
+0. Abstract
+
+   We discuss the threat model for the Bananaphone Pluggable
+   Transport, its limitations, possible uses and implications for
+   combining it with other protocols.
+
+   The Bananaphone Pluggable Transport is based on the Bananaphone
+   codec api written by Leif Ryge.
+
+1. Adversary capabilities and non-capabilities
+
+2. The adversary's goals
+
+3. Goals of bananaphone
+
+   The Bananaphone Pluggable Transport is meant to be combined with
+   other protocols that provide integrity, confidentiality and authentication.
+   Therefore in this case Bananaphone's goal is to simply represent a
+   bitstream as something that looks similar to natural language. This
+   could be useful if combined with a transport meant for some amount
+   of natural language, for instance, HTTP.
+
+   It is possible to extend the Bananaphone codec api to include more
+   sophisticated models that more accurately mimic natural language.
+
+4. Non-goals of bananaphone
+
+   The Bananaphone Pluggable Transport does not provide integrity,
+   confidentiality or authentication; an adversary only needs to guess
+   the encodingSpec (tokenization function, hash function and bits per
+   token) to see the data be transported. This encodingSpec is
+   trivially detectable through frequency analysis.
+
+
