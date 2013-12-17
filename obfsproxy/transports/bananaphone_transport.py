@@ -12,7 +12,7 @@ log = logging.get_obfslogger()
 class BananaphoneTransport(BaseTransport):
     
     def __init__(self, transport_config):
-        pass
+        super(BananaphoneTransport, self).__init__()
 
     def handle_socks_args(self, args):
         if not args:
@@ -47,7 +47,7 @@ class BananaphoneTransport(BaseTransport):
 
         # if we are the client then we receive the transport options
         # from handle_socks_args
-        if cls.initiator:
+        if hasattr(cls, 'initiator'):
             return
 
         transport_options = transport_config.getServerTransportOptions()
@@ -78,22 +78,20 @@ class BananaphoneTransport(BaseTransport):
         cls.decode = rh_decoder(cls.encodingSpec)
 
     @classmethod
-    def get_public_options(cls, transport_options):
+    def get_public_server_options(cls, transport_options):
         """ Only tell BridgeDB about our encodingSpec
         """
         return dict(encodingSpec = transport_options['encodingSpec'])
 
-    def handshake(self, circuit):
-        self.encoder = self.encode > circuit.downstream.write
-        self.decoder = self.decode > circuit.upstream.write
+    def circuitConnected(self):
+        self.encoder = self.encode > self.circuit.downstream.write
+        self.decoder = self.decode > self.circuit.upstream.write
 
-    def receivedDownstream(self, data, circuit):
+    def receivedDownstream(self, data):
         self.decoder.send(data.read())
-        return
 
-    def receivedUpstream(self, data, circuit):
+    def receivedUpstream(self, data):
         self.encoder.send(data.read())
-        return
 
     @classmethod
     def register_external_mode_cli(cls, subparser):
