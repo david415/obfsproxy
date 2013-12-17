@@ -28,13 +28,19 @@ class BaseTransport(object):
     The BaseTransport class is a skeleton class for pluggable transports.
     It contains callbacks that your pluggable transports should
     override and customize.
+
+    Attributes:
+    circuit: Circuit object. This is set just before circuitConnected is called.
     """
 
     def __init__(self):
         """
         Initialize transport. This is called right after TCP connect.
+
+        Subclass overrides should still call this via super().
         """
-        pass
+        self.name = "tran_%s" % hex(id(self))
+        self.circuit = None
 
     @classmethod
     def setup(cls, pt_config):
@@ -43,10 +49,9 @@ class BaseTransport(object):
         and save state in class attributes.
         Called at obfsproxy startup.
         """
-        pass
 
     @classmethod
-    def get_public_options(cls, transport_options):
+    def get_public_server_options(cls, transport_options):
         """
         By default all server transport options are passed to BridgeDB.
         If the transport server wishes to prevent some server
@@ -54,7 +59,7 @@ class BaseTransport(object):
         the transport may override this method and return a
         transport_options dict with the keys/values to be distributed.
 
-        get_public_options receives the transport_options argument which
+        get_public_server_options receives the transport_options argument which
         is a dict of server transport options... for example:
 
         A torrc could specify multiple server transport options:
@@ -63,51 +68,46 @@ class BaseTransport(object):
         ServerTransportOptions bananaphone corpus=/opt/bananaphone-corpora/pg29468.txt encodingSpec=words,sha1,4 modelName=markov order=1
 
         But if the transport wishes to only pass the encodingSpec to
-        the BridgeDB then get_public_options can be overridden like this:
+        the BridgeDB then get_public_server_options can be overridden like this:
 
         @classmethod
-        def get_public_options(cls, transport_options):
+        def get_public_server_options(cls, transport_options):
             return dict(encodingSpec = transport_options['encodingSpec'])
 
-        In this example the get_public_options receives the transport_options dict:
+        In this example the get_public_server_options receives the transport_options dict:
         {'corpus': '/opt/bananaphone-corpora/pg29468.txt', 'modelName': 'markov', 'order': '1', 'encodingSpec': 'words,sha1,4'}
         """
         return None
 
-    def handshake(self, circuit):
+    def circuitConnected(self):
         """
-        The Circuit 'circuit' was completed, and this is a good time
-        to do your transport-specific handshake on its downstream side.
+        Our circuit was completed, and this is a good time to do your
+        transport-specific handshake on its downstream side.
         """
-        pass
 
-    def circuitDestroyed(self, circuit, reason, side):
+    def circuitDestroyed(self, reason, side):
         """
-        Circuit 'circuit' was tore down.
+        Our circuit was tore down.
         Both connections of the circuit are closed when this callback triggers.
         """
-        pass
 
-    def receivedDownstream(self, data, circuit):
+    def receivedDownstream(self, data):
         """
-        Received 'data' in the downstream side of 'circuit'.
+        Received 'data' in the downstream side of our circuit.
         'data' is an obfsproxy.network.buffer.Buffer.
         """
-        pass
 
-    def receivedUpstream(self, data, circuit):
+    def receivedUpstream(self, data):
         """
-        Received 'data' in the upstream side of 'circuit'.
+        Received 'data' in the upstream side of our circuit.
         'data' is an obfsproxy.network.buffer.Buffer.
         """
-        pass
 
     def handle_socks_args(self, args):
         """
         'args' is a list of k=v strings that serve as configuration
         parameters to the pluggable transport.
         """
-        pass
 
     @classmethod
     def register_external_mode_cli(cls, subparser):

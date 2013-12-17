@@ -123,16 +123,19 @@ class Circuit(Protocol):
 
         log.debug("%s: Circuit completed." % self.name)
 
-        # Call the transport-specific handshake method since this is a
-        # good time to perform a handshake.
-        self.transport.handshake(self)
+        # Set us as the circuit of our pluggable transport instance.
+        self.transport.circuit = self
+
+        # Call the transport-specific circuitConnected method since
+        # this is a good time to perform a handshake.
+        self.transport.circuitConnected()
 
         # Do a dummy dataReceived on the initiating connection in case
         # it has any buffered data that must be flushed to the network.
         #
         # (We use callLater because we want to return back to the
-        # event loop so that our handshake() messages get sent to the
-        # network immediately.)
+        # event loop so that any messages we send in circuitConnected get sent
+        # to the network immediately.)
         reactor.callLater(0.01, conn_to_flush.dataReceived, '')
 
     def dataReceived(self, data, conn):
@@ -148,10 +151,10 @@ class Circuit(Protocol):
         try:
             if conn is self.downstream:
                 log.debug("%s: downstream: Received %d bytes." % (self.name, len(data)))
-                self.transport.receivedDownstream(data, self)
+                self.transport.receivedDownstream(data)
             else:
                 log.debug("%s: upstream: Received %d bytes." % (self.name, len(data)))
-                self.transport.receivedUpstream(data, self)
+                self.transport.receivedUpstream(data)
         except base.PluggableTransportError, err: # Our transport didn't like that data.
             log.info("%s: %s: Closing circuit." % (self.name, str(err)))
             self.close()
@@ -174,7 +177,8 @@ class Circuit(Protocol):
         if self.upstream:
             self.upstream.close()
 
-        self.transport.circuitDestroyed(self, reason, side)
+        self.transport.circuitDestroyed(reason, side)
+        self.transport.circuit = None
 
 class GenericProtocol(Protocol, object):
     """

@@ -1,8 +1,17 @@
 Changes in version 0.2.5 - UNRELEASED
  - Use gmpy's modular exponentiation function since it's more efficient.
    Fixes #10031 and adds gmpy as a dependency. Patch by Philipp Winter.
- - Add a setup() method that gets called on obfsproxy startup and
-   can be used by transports for expensive initializations.
+ - Add a transport method called setup() that gets called on obfsproxy
+   startup and can be used by transports for expensive initializations.
+   Patch by David Stainton.
+ - Add a transport method called get_public_server_options() that allows
+   transports to filter server-side options that should not be announced
+   to BridgeDB (because they might leak filesystem paths etc.) .
+   Patch by David Stainton. Fixes #10243.
+ - Make the circuit an attribute of the transport, rather than passing it
+   as a method argument. Patch by Ximin Luo. Fixes #10342.
+ - Rename the handshake() method to circuitConnected().
+   Patch by Ximin Luo.
 
 
 Changes in version 0.2.4 - 2013-09-30
