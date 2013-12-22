@@ -39,6 +39,7 @@ def do_managed_server():
         # Will hold configuration parameters for the pluggable transport module.
         pt_config = transport_config.TransportConfig()
         pt_config.setStateLocation(ptserver.config.getStateLocation())
+        pt_config.setMode("managed")
         transport_options = ""
 
         if server_transport_options and transport in server_transport_options:

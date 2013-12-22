@@ -20,8 +20,15 @@ class TransportConfig( object ):
         Initialise a `TransportConfig' object.
         """
 
-        self.stateLocation = None
+        self.is_managed_mode        = None
+        self.stateLocation          = None
         self.serverTransportOptions = None
+
+    def setMode(self, mode):
+        if mode == 'managed':
+            self.is_managed_mode = True
+        else:
+            self.is_managed_mode = False
 
     def setStateLocation( self, stateLocation ):
         """

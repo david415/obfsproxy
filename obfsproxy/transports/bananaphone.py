@@ -6,7 +6,8 @@ bananaphone.py - stream encoding toolkit
 The codecs implemented here are intended to eventually be usable as Tor
 pluggable transports, but this does not yet implement the pluggable transport
 specficiation. Currently these encoders can be used as shell pipelines and as a
-TCP proxy.
+TCP proxy. (Pluggable Transport support is now underway at
+https://github.com/david415/obfsproxy )
 
 === Reverse Hash Encoding ===
 
@@ -75,16 +76,27 @@ decode "Hello\n" from 13-bit words using the composable coroutine API:
 start a proxy listener for $sshhost, using markov encoder with 2 bits per word:
     socat TCP4-LISTEN:1234,fork EXEC:'bash -c "./bananaphone.py\\ pipeline\\ rh_decoder(words,sha1,2)|socat\\ TCP4\:'$sshhost'\:22\\ -|./bananaphone.py\\ -v\\ rh_encoder\\ words,sha1,2\\ markov\\ corpus.txt"' # FIXME: shell quoting is broken in this example usage after moving to the pipeline model
 
-same as above, but using bananaphone.tcp_proxy instead of socat as the server:
-    python -m bananaphone tcp_proxy rh_server words,sha1,2 markov corpus.txt
-
 connect to the ssh host through the $proxyhost:
     ssh user@host -oProxyCommand="./bananaphone.py pipeline 'rh_encoder((words,sha1,2),\"markov\",\"corpus.txt\")'|socat TCP4:$proxyhost:1234 -|./bananaphone.py pipeline 'rh_decoder((words,sha1,2))'"
+
+same as above, but using bananaphone.tcp_proxy instead of socat as the server:
+    server:
+        python -m bananaphone tcp_proxy 1234 localhost:22 rh_server words,sha1,2 markov corpus.txt
+
+    client:
+        ssh user@host -oProxyCommand="python -m bananaphone tcp_client $proxyhost:1234 rh_client words,sha1,2 markov corpus.txt"
+
+start a webserver at localhost:8000 with an interactive composition interface
+which shows all tokens available for encoding each word of input:
+    python -mbananaphone httpd_chooser asciiwords,sha1,8
 
 === Hammertime encoding ===
 
 This is a chaff layer intended to impede passive timing analysis. It should be
-layered underneath a stream cipher (not yet implemented here).
+layered underneath a stream cipher (not yet implemented here, probably should
+use obfs3?). WARNING: the current encoder implementation uses threads and has a
+bug which can cause it to rapidly consume all ram when used with the twisted
+wrappers (tcp_proxy, tcp_client).
 
 Threat models:
 Alice establishes a TCP connection to Bob via the Tor network.
@@ -108,21 +120,21 @@ maintaining low enough latency to estabish TCP connections.
 
 TODO:
 * add stream cipher
-** hammertime needs one to be at all useful. TLS would be fine.
-** RH encoding needs an indistinguishable one to provide more than obfuscation.
+** hammertime needs one to be at all useful.
+** RH encoding needs an indistinguishable stream under it to provide more than obfuscation. see obfs3, perhaps elligator
 * document hammertime usage
-* implement Tor pluggable transport spec
+* implement Tor pluggable transport spec (now underway!)
 """
 
 __author__    = "Leif Ryge <leif@synthesize.us>"
-__copyright__ = "No Rights Reserved, Uncopyright 2012"
+__license__   = "CC0 (Public Domain)"
 
 import os, sys, time, readline
 from random      import choice, randrange
 from hashlib     import md5, sha1, sha224, sha256, sha384, sha512
 from itertools   import islice, imap
 from collections import deque
-from cocotools   import cmap, cfilter, coroutine, composable, cdebug, cmapstar, tee, coThreadWithQueueAccess, pv
+from cocotools   import cmap, cfilter, coroutine, composable, cdebug, cmapstar, tee, coThread, pv
 
 HASHES  = [ md5, sha1, sha224, sha256, sha384, sha512 ]
 GLOBALS = globals()
@@ -195,12 +207,22 @@ def changeWordSize ( inSize, outSize ):
     return _changeWordSize
 
 
-def buildWeightedRandomModel ( corpusTokens, hash ):
+def buildWeightedRandomModel ( corpusTokens, hash, shortest = False ):
     model = {}
-    for token in corpusTokens:
-        model.setdefault( hash( token ), [] ).append( token )
+    if not shortest:
+        for token in corpusTokens:
+            model.setdefault( hash( token ), [] ).append( token )
+    else:
+        for token in corpusTokens:
+            tokenValue = hash( token )
+            if tokenValue in model:
+                if len(model[tokenValue][0]) > len(token):
+                    model[tokenValue] = [ token ]
+                elif len(model[tokenValue][0]) == len(token):
+                    model[tokenValue].append( token )
+            else:
+                model[tokenValue] = [ token ]
     return model
-
 
 def ngram ( n ):
     """
@@ -354,12 +376,16 @@ def streamTokenizer ( stopBytes ):
                 value = []
     return tokenizer
 
-
 words = streamTokenizer( " \n" ) \
         | cfilter( lambda token: token not in ( " ", "\n" ) ) \
         | cmap( lambda token: token.strip() + ' ' )
 appendTo(TOKENIZERS)( words )
 
+asciiwords = streamTokenizer( " \n" ) \
+        | cmap( lambda token: "".join(b for b in token if 0x20 <= ord(b) <= 0x7e) ) \
+        | cfilter( lambda token: token not in ( " ", "\n" ) ) \
+        | cmap( lambda token: token.strip() + ' ' )
+appendTo(TOKENIZERS)( asciiwords )
 
 lines  = appendTo(TOKENIZERS)( streamTokenizer( "\n" ) )
 words2 = appendTo(TOKENIZERS)( streamTokenizer( " \n.,;?!" ) )
@@ -393,52 +419,55 @@ def markov ( tokenize, hash, bits, corpusFilename, order=1, abridged=None ):
         total   = 0
         adhered = order - 1
 
-    prevList = [ None ]
+    def encodeFactory():
 
-    def encode ( value ):
+        prevList = [ None ]
 
-        prevTuple = tuple( prevList )
-        stats.total += 1
+        def encode ( value ):
 
-        if prevTuple in model and value in model[ prevTuple ] and len(model[ prevTuple ][ value ]):
-            stats.adhered += 1
-            choices = []
-            for token, count in model[ prevTuple ][ value ].items():
-                choices.extend( [token] * count )
-        
-        else:
-            choices = randomModel[ value ]
-        
-        nextWord = choice( choices )
+            prevTuple = tuple( prevList )
+            stats.total += 1
 
-        if stats.total >= order:
-            prevList.pop(0)
+            if prevTuple in model and value in model[ prevTuple ] and len(model[ prevTuple ][ value ]):
+                stats.adhered += 1
+                choices = []
+                for token, count in model[ prevTuple ][ value ].items():
+                    choices.extend( [token] * count )
+            
+            else:
+                choices = randomModel[ value ]
+            
+            nextWord = choice( choices )
 
-        prevList.append( nextWord )
+            if stats.total >= order:
+                prevList.pop(0)
 
-        if not stats.total % 10**5:
-            debug( "%s words encoded, %s%% adhering to model" % ( stats.total, (100.0* stats.adhered / stats.total ) ) )
+            prevList.append( nextWord )
 
-        return nextWord
+            if not stats.total % 10**5:
+                debug( "%s words encoded, %s%% adhering to model" % ( stats.total, (100.0* stats.adhered / stats.total ) ) )
 
-    return encode
+            return nextWord
+        return encode
+    return encodeFactory
 
 
 @appendTo(MODELS)
-def random ( tokenize, hash, bits, corpusFilename ):
+def random ( tokenize, hash, bits, corpusFilename, shortest=False ):
 
     truncatedHash = truncateHash( hash, bits )
     corpusTokens  = list( tokenize < readTextFile( corpusFilename ) )
-    model         = buildWeightedRandomModel( corpusTokens, truncatedHash )
+    model         = buildWeightedRandomModel( corpusTokens, truncatedHash, shortest )
     percentFull   = getPercentFull( model, bits )
     assert percentFull == 100, "not enough tokens for %s-bit hashing (%s%% there)" % (bits, percentFull)
     
     debug( "built weighted random model from %s tokens (%s unique)" % ( len(corpusTokens), len(set(corpusTokens)) ) )
 
-    def encode( value ):
-        return choice( model[ value ] )
-    
-    return encode
+    def encodeFactory():
+        def encode( value ):
+            return choice( model[ value ] )
+        return encode
+    return encodeFactory
 
 
 PIPELINES = []
@@ -457,9 +486,25 @@ def rh_encoder ( encodingSpec, modelName, *args ):
     model = GLOBALS.get( modelName )
     assert model in MODELS, "model must be one of %s, got %s" % ( formatGlobalNames( MODELS ), modelName )
 
-    encode = model( tokenize, hash, bits, *args )
+    encode = model( tokenize, hash, bits, *args )()
     
     return toBytes | cmap(ord) | changeWordSize(8, bits) | cmap(encode)
+
+
+def rh_build_encoder_factory ( encodingSpec, modelName, *args ):
+
+    tokenize, hash, bits = parseEncodingSpec( encodingSpec )
+
+    model = GLOBALS.get( modelName )
+    assert model in MODELS, "model must be one of %s, got %s" % ( formatGlobalNames( MODELS ), modelName )
+
+    encodeFactory = model( tokenize, hash, bits, *args )
+
+    def encoderFactory():
+        encode = encodeFactory()
+        return toBytes | cmap(ord) | changeWordSize(8, bits) | cmap(encode)
+
+    return encoderFactory
 
 COMMANDS = {}
 
@@ -477,7 +522,7 @@ def rh_encoder_permuter ( encodingSpec, modelName, corpusFilename, separator="0a
     
     corpusTokens = list( tokenize < readTextFile( corpusFilename ) )
 
-    encode = model( corpusTokens, truncatedHash, bits, *args )
+    encode = model( corpusTokens, truncatedHash, bits, *args )()
 
     def process ( byteStream ):
         scaledWords = list( changeWordSize( map( ord, byteStream ), 8, bits ) )
@@ -517,7 +562,7 @@ def rh_print_corpus_stats ( encodingSpec, corpusFilename, order=1 ):
 
 from Queue import Empty
 
-@coThreadWithQueueAccess
+@coThread.withQueueAccess
 def hammertime_encoder ( queue, target ):
     """
     This adds chaff to a bytestream to impede passive timing analysis.
@@ -603,15 +648,34 @@ def httpd_chooser ( encodingSpec   = 'words,sha1,12',
             self.send_response( 200 )
             self.send_header("Content-type", "text/html")
             self.end_headers()
-            html = "<html><form><input name=input type=text><br>"
-            data = urlparse.parse_qs( self.path[2:] ).get( 'input' )
+            data = urlparse.parse_qs( self.path[2:] ).get( 'input' ) or [""]
+            shortest = urlparse.parse_qs( self.path[2:] ).get( 'shortest' )
+            html = """
+<html>
+<script>
+function update(){
+    document.getElementById('output').value = Array.prototype.slice.call(
+        document.getElementsByTagName('select')).map(function (s) {
+            return s.options[s.selectedIndex].value }).join('');
+    document.getElementById('length').textContent = document.getElementById('output').value.length
+}
+function submit() { document.getElementById('form').submit(); }
+</script>
+<body onload=update()>
+<tt>%s</tt> encoding from <tt>%s</tt> (%s tokens, %s unique)<hr>
+<form id=form>Text to encode: <input name=input type=text value="%s"><br>
+<small><input type=checkbox name=shortest %s onchange=submit()>Sort by length (instead of frequency)</small><hr>
+Select alternates:
+            """ % (encodingSpec, corpusFilename, len(corpusTokens), len(set(corpusTokens)), data[0], 'checked' if shortest else '')
             if data != None:
-                for word in changeWordSize( map( ord, data[0] ), 8, bits ):
-                    html += "<select>"
-                    for token in sorted( set(model[ word ]), key=model[word].count, reverse=True ):
-                        html += "<option>%s</option>" % ( token, )
+                for word in changeWordSize( 8, bits ) < map( ord, data[0] ):
+                    keyFunc = len if shortest else model[word].count
+                    html += '<select onchange=update() title="%s words hash to value %s">' % (len(set(model[word])),word)
+                    for token in sorted( set(model[ word ]), key=keyFunc, reverse=(not shortest) ):
+                        html += "<option value='%s'>%s</option>" % ( token, token )
                     html += "</select>"
-            self.wfile.write( html + "\n" )
+            self.wfile.write( html + "<hr>Result (<span id=length></span> bytes):<br>" +
+                                     "<textarea id=output cols=80 rows=5></textarea><br>(pipe through <tt>python -mbananaphone pipeline 'rh_decoder(\"%s\")'</tt> to decode it)" % (encodingSpec,))
     debug( "Listening on port %s" % (port,) )
     HTTPServer( serverAddress, RequestHandler ).serve_forever()
 
@@ -736,22 +800,13 @@ class usage ( composable ):
             try:
                 return fn( *args, **kwargs )
             except TypeError:
-                print fn.__doc__.format(globals=globals())
+                if fn.__doc__ is not None:
+                    print fn.__doc__.format(globals=globals())
                 raise
         composable.__init__( self, _command )
 
+def _buildTwistedProxyProtocolFactory( destHostPort, codecName, *args ):
 
-@register( COMMANDS, 'tcp_proxy' )
-@usage
-def tcp_proxy ( listenPort, destHostPort, codecName, *args ):
-    """
-    listenPort   - TCP port number to listen on
-    destHostPort - host:port to connect to
-    codecName    - name of encoder/decoder pair to use
-    codecArgs    - codec parameters
-    """
-
-    from twisted.protocols import basic
     from twisted.internet  import reactor, protocol, defer
 
     def callFromThreadWrapper( fn ):
@@ -766,6 +821,7 @@ def tcp_proxy ( listenPort, destHostPort, codecName, *args ):
 
         def connectionLost(self, why):
             debug( "Connection lost." )
+            self.byteSink.close()
             self.loseRemoteConnection()
 
 
@@ -820,9 +876,35 @@ def tcp_proxy ( listenPort, destHostPort, codecName, *args ):
     codec = GLOBALS.get( codecName )
     assert codec in CODECS, "codec must be one of %s, got %s" % ( formatGlobalNames( CODECS ), codecName )
     
-    reactor.listenTCP( int(listenPort), ProxyServerFactory( destHostPort, codec(*args) ) )
+    return ProxyServerFactory( destHostPort, codec(*args) )
+
+
+@register( COMMANDS, 'tcp_proxy' )
+@usage
+def tcp_proxy ( listenPort, destHostPort, codecName, *args ):
+    """
+    listenPort   - TCP port number to listen on
+    destHostPort - host:port to connect to
+    codecName    - name of encoder/decoder pair to use
+    codecArgs    - codec parameters
+    """
+    from twisted.internet import reactor
+    factory = _buildTwistedProxyProtocolFactory( destHostPort, codecName, *args )
+    reactor.listenTCP( int(listenPort), factory )
     reactor.run()
 
+@register( COMMANDS, 'tcp_client' )
+@usage
+def tcp_client ( destHostPort, codecName, *args ):
+    """
+    destHostPort - host:port to connect to
+    codecName    - name of encoder/decoder pair to use
+    codecArgs    - codec parameters
+    """
+    from twisted.internet import reactor, stdio
+    factory = _buildTwistedProxyProtocolFactory( destHostPort, codecName, *args )
+    stdio.StandardIO( factory.buildProtocol(None) )
+    reactor.run()
 
 @register( COMMANDS, 'test' )
 def test( verbose=None ):
@@ -840,8 +922,6 @@ def main ( progname, command=None, *argv ):
         global verbose
         verbose = True
         command = argv.pop(0)
-
-#    command = GLOBALS.get( command, None )
 
     if command in COMMANDS:
 
