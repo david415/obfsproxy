@@ -7,6 +7,7 @@ from pyptlib.server import ServerTransportPlugin
 from pyptlib.config import EnvError
 
 import obfsproxy.transports.transports as transports
+import obfsproxy.transports.base as base
 import obfsproxy.network.launch_transport as launch_transport
 import obfsproxy.common.log as logging
 import obfsproxy.common.transport_config as transport_config
@@ -39,16 +40,25 @@ def do_managed_server():
         # Will hold configuration parameters for the pluggable transport module.
         pt_config = transport_config.TransportConfig()
         pt_config.setStateLocation(ptserver.config.getStateLocation())
-        pt_config.setMode("managed")
-        transport_options = ""
+        if ext_orport:
+            pt_config.setListenerMode("ext_server")
+        else:
+            pt_config.setListenerMode("server")
+        pt_config.setObfsproxyMode("managed")
 
+        transport_options = ""
         if server_transport_options and transport in server_transport_options:
             transport_options = server_transport_options[transport]
             pt_config.setServerTransportOptions(transport_options)
 
         # Call setup() method for this tranpsort.
         transport_class = transports.get_transport_class(transport, 'server')
-        transport_class.setup(pt_config)
+        try:
+            transport_class.setup(pt_config)
+        except base.TransportSetupFailed, err:
+            log.warning("Transport '%s' failed during setup()." % transport)
+            ptserver.reportMethodError(transport, "setup() failed: %s." % (err))
+            continue
 
         try:
             if ext_orport:
@@ -68,9 +78,11 @@ def do_managed_server():
             log.warning("Could not find transport '%s'" % transport)
             ptserver.reportMethodError(transport, "Could not find transport.")
             continue
-        except error.CannotListenError:
-            log.warning("Could not set up listener for '%s'." % transport)
-            ptserver.reportMethodError(transport, "Could not set up listener.")
+        except error.CannotListenError, e:
+            error_msg = "Could not set up listener (%s:%s) for '%s' (%s)." % \
+                        (e.interface, e.port, transport, e.socketError[1])
+            log.warning(error_msg)
+            ptserver.reportMethodError(transport, error_msg)
             continue
 
         should_start_event_loop = True

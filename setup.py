@@ -33,7 +33,11 @@ setup(
         'PyCrypto',
         'Twisted',
         'argparse',
-        'pyptlib >= 0.0.5',
-        'gmpy'
+        'pyptlib >= 0.0.6',
+        'pyyaml'
         ],
+
+    extras_require = {
+        'SOCKS': ["txsocksx"]
+        }
 )

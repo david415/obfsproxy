@@ -1,4 +1,73 @@
-Changes in version 0.2.5 - UNRELEASED
+Changes in version 0.2.11 - UNRELEASED:
+ - Write a 'server_password' file with the scramblesuit password to
+   make it easier for bridge operators to find their password. Patch
+   by Philipp Winter. Fixes #10887.
+ - Add --password-file switch for providing scramblesuit passwords.
+   Patch by irregulator. Fixes #8040.
+ - Fix bug to prevent denial-of-service attacks targeting the
+   authentication mechanism.  Fixes #11092. The problem was pointed
+   out by Yawning Angel.
+ - Fix bug to prevent denial-of-service attacks targeting the
+   authentication mechanism.  Fixes #11092. The problem was pointed
+   out by Yawning Angel.
+ - Improve scramblesuit spec and fix several issues. Fixes bug #10893.
+   Thanks to Yawning Angel.
+ - Improve scramblesuit's packet morphing algorithm. Fixes bug #10991.
+   Thanks to Yawning Angel.
+ - When in external mode, only call the setup() method of the
+   transport we are going to launch, not of all transports.
+
+
+Changes in version 0.2.10 - 2014-06-05:
+ - Don't set the transport's circuit to None if we are closing
+   a circuit; it was causing problems in obfs3. Fixes #11820.
+ - Make sure that we don't try to do networking operations on a
+   connection that should be closed. Fixes #11769.
+ - Only print ScrambleSuit disclaimer on startup (instead of
+   printing it for every connection). Fixes #11768.
+ - Log the pyptlib version in startup. Patch by John Giannelos. Fixes #9878.
+
+
+Changes in version 0.2.9 - 2014-05-01:
+ - Support connecting over a HTTPS CONNECT proxy.  Patch by Yawning Angel.
+   Fixes #11409.
+ - Support connecting over SOCKS4(a) and SOCKS5.  Based on the patch by
+   Arturo Filastò with changes by Yawning Angel.  Fixes #8956.
+ - Fix the shebang of the obfsproxy executable so that it
+   explicitly picks python2.  Makes obfsproxy work in platforms like
+   Linux Arch where python3 is the default.  Fixes part of #11190.
+   Patch by Yawning Angel.
+ - The AES-CTR counter of obfs2 and obfs3 now wraps around to 0.
+   Since, the counter value was derived from the protocol, there
+   was an unlikely chance that PyCrypto would raise an OverflowError
+   exception. Spotted by Yawning Angel. Fixes #11611.
+
+
+Changes in version 0.2.8 - 2014-03-28:
+ - Fix a bug in the SOCKS5 sever code.  An exception would be raised on systems
+   with Python < 2.7.4.  Patch by Yawning Angel.  Fixes #11329.
+ - Obfsproxy can now resolve bridge addresses that were provided as
+   DNS hostnames.  Fix suggested by Yawning Angel. Resolves #10316.
+
+
+Changes in version 0.2.7 - 2014-03-15
+ - Support SOCKS5 instead of SOCKS4. Patch by Yawning Angel. Fixes #9221.
+ - Fix a scramblesuit bug that makes bridges reject a session
+   ticket connection from already seen clients. Diagnosed and patched
+   by Yawning Angel. Fixes #11100.
+ - obfs3 now uses twisted.internet.threads.deferToThread to process
+   the key exchange outside of the main event loop.
+   Patch by Yawning Angel. Fixes #11015.
+ - Support gmpy2 if it is available in addition to gmpy.
+   Patch by Yawning Angel.
+
+
+Changes in version 0.2.6 - 2014-02-03
+ - Stop having 'gmpy' as a hard dependency by removing it from setup.py.
+   Now gmpy is only used if it was already installed on the system.
+
+
+Changes in version 0.2.5 - 2014-02-03
  - Use gmpy's modular exponentiation function since it's more efficient.
    Fixes #10031 and adds gmpy as a dependency. Patch by Philipp Winter.
  - Add a transport method called setup() that gets called on obfsproxy
@@ -12,6 +81,7 @@ Changes in version 0.2.5 - UNRELEASED
    as a method argument. Patch by Ximin Luo. Fixes #10342.
  - Rename the handshake() method to circuitConnected().
    Patch by Ximin Luo.
+ - Add ScrambleSuit as transport protocol. Fixes #10598.
 
 
 Changes in version 0.2.4 - 2013-09-30

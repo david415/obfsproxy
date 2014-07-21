@@ -10,6 +10,7 @@ Currently, not all of the obfsproxy command line options have been implemented.
 import sys
 
 import obfsproxy.network.launch_transport as launch_transport
+import obfsproxy.network.network as network
 import obfsproxy.transports.transports as transports
 import obfsproxy.common.log as logging
 import obfsproxy.common.argparser as argparser
@@ -19,7 +20,12 @@ import obfsproxy.managed.server as managed_server
 import obfsproxy.managed.client as managed_client
 from obfsproxy import __version__
 
+try:
+    from pyptlib import __version__ as pyptlibversion
+except Exception:
+    pass
 from pyptlib.config import checkClientMode
+from pyptlib.client_config import parseProxyURI
 
 from twisted.internet import task # for LoopingCall
 
@@ -46,6 +52,9 @@ def set_up_cli_parsing():
                         help='disable safe (scrubbed address) logging')
     parser.add_argument('--data-dir', help='where persistent information should be stored.',
                         default=None)
+
+    parser.add_argument('--proxy', action='store', dest='proxy',
+                        help='Outgoing proxy (<proxy_type>://[<user_name>][:<password>][@]<ip>:<port>)')
 
     # Managed mode is a subparser for now because there are no
     # optional subparsers: bugs.python.org/issue9253
@@ -82,10 +91,14 @@ def do_external_mode(args):
 
     pt_config = transport_config.TransportConfig()
     pt_config.setStateLocation(args.data_dir)
-    pt_config.setMode("external")
+    pt_config.setListenerMode(args.mode)
+    pt_config.setObfsproxyMode("external")
+    if args.proxy: # Set outgoing proxy settings if we have them
+        proxy = parseProxyURI(args.proxy)
+        pt_config.setProxy(proxy)
 
     # Run setup() method.
-    run_transport_setup(pt_config)
+    run_transport_setup(pt_config, args.name)
 
     launch_transport.launch_transport_listener(args.name, args.listen_addr, args.mode, args.dest, pt_config, args.ext_cookie_file)
     log.info("Launched '%s' listener at '%s:%s' for transport '%s'." % \
@@ -112,10 +125,29 @@ def consider_cli_args(args):
         # managed proxies without a logfile must not log at all.
         log.disable_logs()
 
-def run_transport_setup(pt_config):
+    if args.proxy:
+        # CLI proxy is only supported in external mode.
+        if args.name == 'managed':
+            log.error("Don't set the proxy using the CLI in managed mode. " \
+                      "Use the managed-proxy configuration protocol instead!")
+            sys.exit(1)
+
+        # Check if we have the necessary dependencies
+        # (the function will raise an exception if not)
+        network.ensure_outgoing_proxy_dependencies()
+
+        # Make sure that the proxy URI parses smoothly.
+        try:
+            proxy = parseProxyURI(args.proxy)
+        except Exception as e:
+            log.error("Failed to parse proxy specifier: %s", e)
+            sys.exit(1)
+
+def run_transport_setup(pt_config, transport_name):
     """Run the setup() method for our transports."""
     for transport, transport_class in transports.transports.items():
-        transport_class['base'].setup(pt_config)
+        if transport == transport_name:
+            transport_class['base'].setup(pt_config)
 
 def pyobfsproxy():
     """Actual pyobfsproxy entry-point."""
@@ -126,6 +158,10 @@ def pyobfsproxy():
     consider_cli_args(args)
 
     log.warning('Obfsproxy (version: %s) starting up.' % (__version__))
+    try:
+        log.warning('Pyptlib version: %s' % pyptlibversion)
+    except Exception:
+        pass
 
     log.debug('argv: ' + str(sys.argv))
     log.debug('args: ' + str(args))

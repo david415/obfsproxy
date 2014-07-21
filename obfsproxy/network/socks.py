@@ -1,15 +1,17 @@
 import csv
 
-from twisted.protocols import socks
-from twisted.internet.protocol import Factory
+from twisted.internet import reactor, protocol
 
 import obfsproxy.common.log as logging
 import obfsproxy.network.network as network
+import obfsproxy.network.socks5 as socks5
 import obfsproxy.transports.base as base
+
 
 log = logging.get_obfslogger()
 
-def split_socks_args(args_str):
+
+def _split_socks_args(args_str):
     """
     Given a string containing the SOCKS arguments (delimited by
     semicolons, and with semicolons and backslashes escaped), parse it
@@ -17,14 +19,14 @@ def split_socks_args(args_str):
     """
     return csv.reader([args_str], delimiter=';', escapechar='\\').next()
 
-class MySOCKSv4Outgoing(socks.SOCKSv4Outgoing, network.GenericProtocol):
+
+class OBFSSOCKSv5Outgoing(socks5.SOCKSv5Outgoing, network.GenericProtocol):
     """
     Represents a downstream connection from the SOCKS server to the
     destination.
 
-    It monkey-patches socks.SOCKSv4Outgoing, because we need to pass
-    our data to the pluggable transport before proxying them
-    (Twisted's socks module did not support that).
+    It subclasses socks5.SOCKSv5Outgoing, so that data can be passed to the
+    pluggable transport before proxying.
 
     Attributes:
     circuit: The circuit this connection belongs to.
@@ -34,135 +36,140 @@ class MySOCKSv4Outgoing(socks.SOCKSv4Outgoing, network.GenericProtocol):
             data before deciding what to do.
     """
 
+    name = None
+
     def __init__(self, socksProtocol):
         """
         Constructor.
 
-        'socksProtocol' is a 'SOCKSv4Protocol' object.
+        'socksProtocol' is a 'SOCKSv5Protocol' object.
         """
         self.name = "socks_down_%s" % hex(id(self))
-        self.socksProtocol = socksProtocol
+        self.socks = socksProtocol
 
         network.GenericProtocol.__init__(self, socksProtocol.circuit)
-        return super(MySOCKSv4Outgoing, self).__init__(socksProtocol)
+        return super(OBFSSOCKSv5Outgoing, self).__init__(socksProtocol)
+
+    def connectionMade(self):
+        self.socks.set_up_circuit(self)
+
+        # XXX: The transport should be doing this after handshaking since it
+        # calls, self.socks.sendReply(), when this changes to defer sending the
+        # reply back set self.socks.otherConn here.
+        super(OBFSSOCKSv5Outgoing, self).connectionMade()
 
     def dataReceived(self, data):
-        log.debug("%s: Received %d bytes." % (self.name, len(data)))
+        log.debug("%s: Recived %d bytes." % (self.name, len(data)))
 
-        # If the circuit was not set up, set it up now.
-        if not self.circuit.circuitIsReady():
-            self.socksProtocol.set_up_circuit()
-
+        assert self.circuit.circuitIsReady()
         self.buffer.write(data)
         self.circuit.dataReceived(self.buffer, self)
 
-    def close(self): # XXX code duplication
-        """
-        Close the connection.
-        """
-        if self.closed:
-            return # NOP if already closed
+class OBFSSOCKSv5OutgoingFactory(protocol.Factory):
+    """
+    A OBFSSOCKSv5OutgoingFactory, used only when connecting via a proxy
+    """
 
-        log.debug("%s: Closing connection." % self.name)
+    def __init__(self, socksProtocol):
+        self.socks = socksProtocol
 
-        self.transport.loseConnection()
-        self.closed = True
+    def buildProtocol(self, addr):
+        return OBFSSOCKSv5Outgoing(self.socks)
 
-    def connectionLost(self, reason):
-        network.GenericProtocol.connectionLost(self, reason)
+    def clientConnectionFailed(self, connector, reason):
+        self.socks.transport.loseConnection()
 
-# Monkey patches socks.SOCKSv4Outgoing with our own class.
-socks.SOCKSv4Outgoing = MySOCKSv4Outgoing
+    def clientConnectionLost(self, connector, reason):
+        self.socks.transport.loseConnection()
 
-class SOCKSv4Protocol(socks.SOCKSv4, network.GenericProtocol):
+class OBFSSOCKSv5Protocol(socks5.SOCKSv5Protocol, network.GenericProtocol):
     """
     Represents an upstream connection from a SOCKS client to our SOCKS
     server.
 
-    It overrides socks.SOCKSv4 because py-obfsproxy's connections need
+    It overrides socks5.SOCKSv5Protocol because py-obfsproxy's connections need
     to have a circuit and obfuscate traffic before proxying it.
     """
 
-    def __init__(self, circuit):
+    def __init__(self, circuit, pt_config):
         self.name = "socks_up_%s" % hex(id(self))
+        self.pt_config = pt_config
 
         network.GenericProtocol.__init__(self, circuit)
-        socks.SOCKSv4.__init__(self)
-
-    def dataReceived(self, data):
-        """
-        Received some 'data'. They might be SOCKS handshake data, or
-        actual upstream traffic. Figure out what it is and either
-        complete the SOCKS handshake or proxy the traffic.
-        """
-
-        # SOCKS handshake not completed yet: let the overriden socks
-        # module complete the handshake.
-        if not self.otherConn:
-            log.debug("%s: Received SOCKS handshake data." % self.name)
-            return socks.SOCKSv4.dataReceived(self, data)
-
-        log.debug("%s: Received %d bytes." % (self.name, len(data)))
-        self.buffer.write(data)
-
-        """
-        If we came here with an incomplete circuit, it means that we
-        finished the SOCKS handshake and connected downstream. Set up
-        our circuit and start proxying traffic.
-        """
-        if not self.circuit.circuitIsReady():
-            self.set_up_circuit()
-
-        self.circuit.dataReceived(self.buffer, self)
-
-    def set_up_circuit(self):
-        """
-        Set the upstream/downstream SOCKS connections on the circuit.
-        """
-
-        assert(self.otherConn)
-        self.circuit.setDownstreamConnection(self.otherConn)
-        self.circuit.setUpstreamConnection(self)
-
-    def authorize(self, code, server, port, user):
-        """
-        (Overriden)
-        Accept or reject a SOCKS client that wants to connect to
-        'server':'port', with the SOCKS4 username 'user'.
-        """
-
-        if not user: # No SOCKS arguments were specified.
-            return True
-
-        # If the client sent us SOCKS arguments, we must parse them
-        # and send them to the appropriate transport.
-        log.debug("Got '%s' as SOCKS arguments." % user)
-
-        try:
-            socks_args = split_socks_args(user)
-        except csv.Error, err:
-            log.warning("split_socks_args failed (%s)" % str(err))
-            return False
-
-        try:
-            self.circuit.transport.handle_socks_args(socks_args)
-        except base.SOCKSArgsError:
-            return False # Transports should log the issue themselves
-
-        return True
+        socks5.SOCKSv5Protocol.__init__(self)
 
     def connectionLost(self, reason):
         network.GenericProtocol.connectionLost(self, reason)
 
-class SOCKSv4Factory(Factory):
+    def processEstablishedData(self, data):
+        assert self.circuit.circuitIsReady()
+        self.buffer.write(data)
+        self.circuit.dataReceived(self.buffer, self)
+
+    def processRfc1929Auth(self, uname, passwd):
+        """
+        Handle the Pluggable Transport variant of RFC1929 Username/Password
+        authentication.
+        """
+
+        # The Tor PT spec jams the per session arguments into the UNAME/PASSWD
+        # fields, and uses this to pass arguments to the pluggable transport.
+
+        # Per the RFC, it's not possible to have 0 length passwords, so tor sets
+        # the length to 1 and the first byte to NUL when passwd doesn't actually
+        # contain data.  Recombine the two fields if appropriate.
+        args = uname
+        if len(passwd) > 1 or ord(passwd[0]) != 0:
+            args += passwd
+
+        # Arguments are a CSV string with Key=Value pairs.  The transport is
+        # responsible for dealing with the K=V format, but the SOCKS code is
+        # currently expected to de-CSV the args.
+        #
+        # XXX: This really should also handle converting the K=V pairs into a
+        # dict.
+        try:
+            split_args = _split_socks_args(args)
+        except csvError, err:
+            log.warning("split_socks_args failed (%s)" % str(err))
+            return False
+
+        # Pass the split up list to the transport.
+        try:
+            self.circuit.transport.handle_socks_args(split_args)
+        except base.SOCKSArgsError:
+            # Transports should log the issue themselves
+            return False
+
+        return True
+
+    def connectClass(self, addr, port, klass, *args):
+        """
+        Instantiate the outgoing connection.
+
+        This is overriden so that our sub-classed SOCKSv5Outgoing gets created,
+        and a proxy is optionally used for the outgoing connection.
+        """
+
+        if self.pt_config.proxy:
+            instance = OBFSSOCKSv5OutgoingFactory(self)
+            return network.create_proxy_client(addr, port, self.pt_config.proxy, instance)
+        else:
+            return protocol.ClientCreator(reactor, OBFSSOCKSv5Outgoing, self).connectTCP(addr, port)
+
+    def set_up_circuit(self, otherConn):
+        self.circuit.setDownstreamConnection(otherConn)
+        self.circuit.setUpstreamConnection(self)
+
+class OBFSSOCKSv5Factory(protocol.Factory):
     """
-    A SOCKSv4 factory.
+    A SOCKSv5 factory.
     """
 
     def __init__(self, transport_class, pt_config):
         # XXX self.logging = log
         self.transport_class = transport_class
-        self.pt_config  = pt_config
+        self.pt_config = pt_config
 
         self.name = "socks_fact_%s" % hex(id(self))
 
@@ -172,6 +179,6 @@ class SOCKSv4Factory(Factory):
     def buildProtocol(self, addr):
         log.debug("%s: New connection." % self.name)
 
-        circuit = network.Circuit(self.transport_class(self.pt_config))
+        circuit = network.Circuit(self.transport_class())
 
-        return SOCKSv4Protocol(circuit)
+        return OBFSSOCKSv5Protocol(circuit, self.pt_config)

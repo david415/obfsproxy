@@ -120,6 +120,9 @@ class Circuit(Protocol):
         Circuit was just completed; that is, its endpoints are now
         connected. Do all the things we have to do now.
         """
+        if self.closed:
+            log.debug("%s: Completed circuit while closed. Ignoring.", self.name)
+            return
 
         log.debug("%s: Circuit completed." % self.name)
 
@@ -145,6 +148,10 @@ class Circuit(Protocol):
 
         Requires both downstream and upstream connections to be set.
         """
+        if self.closed:
+            log.debug("%s: Calling circuit's dataReceived while closed. Ignoring.", self.name)
+            return
+
         assert(self.downstream and self.upstream)
         assert((conn is self.downstream) or (conn is self.upstream))
 
@@ -178,7 +185,6 @@ class Circuit(Protocol):
             self.upstream.close()
 
         self.transport.circuitDestroyed(reason, side)
-        self.transport.circuit = None
 
 class GenericProtocol(Protocol, object):
     """
@@ -208,6 +214,10 @@ class GenericProtocol(Protocol, object):
         """
         Write 'buf' to the underlying transport.
         """
+        if self.closed:
+            log.debug("%s: Calling write() while connection is closed. Ignoring.", self.name)
+            return
+
         log.debug("%s: Writing %d bytes." % (self.name, len(buf)))
 
         self.transport.write(buf)
@@ -291,6 +301,10 @@ class StaticDestinationProtocol(GenericProtocol):
         XXX: Can also be called with empty 'data' because of
         Circuit.setDownstreamConnection(). Document or split function.
         """
+        if self.closed:
+            log.debug("%s: dataReceived called while closed. Ignoring.", self.name)
+            return
+
         if (not self.buffer) and (not data):
             log.debug("%s: dataReceived called without a reason.", self.name)
             return
@@ -363,11 +377,96 @@ class StaticDestinationServerFactory(Factory):
     def buildProtocol(self, addr):
         log.debug("%s: New connection from %s:%d." % (self.name, log.safe_addr_str(addr.host), addr.port))
 
-        circuit = Circuit(self.transport_class(self.pt_config))
+        circuit = Circuit(self.transport_class())
 
         # XXX instantiates a new factory for each client
         clientFactory = StaticDestinationClientFactory(circuit, self.mode)
-        reactor.connectTCP(self.remote_host, self.remote_port, clientFactory)
+
+        if self.pt_config.proxy:
+            create_proxy_client(self.remote_host, self.remote_port,
+                                self.pt_config.proxy,
+                                clientFactory)
+        else:
+            reactor.connectTCP(self.remote_host, self.remote_port, clientFactory)
 
         return StaticDestinationProtocol(circuit, self.mode, addr)
 
+def create_proxy_client(host, port, proxy_spec, instance):
+    """
+    host:
+    the host of the final destination
+    port:
+    the port number of the final destination
+    proxy_spec:
+    the address of the proxy server as a urlparse.SplitResult
+    instance:
+    is the instance to be associated with the endpoint
+
+    Returns a deferred that will fire when the connection to the SOCKS server has been established.
+    """
+
+    # Inline import so that txsocksx is an optional dependency.
+    from twisted.internet.endpoints import HostnameEndpoint
+    from txsocksx.client import SOCKS4ClientEndpoint, SOCKS5ClientEndpoint
+    from obfsproxy.network.http import HTTPConnectClientEndpoint
+
+    TCPPoint = HostnameEndpoint(reactor, proxy_spec.hostname, proxy_spec.port)
+    username = proxy_spec.username
+    password = proxy_spec.password
+
+    # Do some logging
+    log.debug("Connecting via %s proxy %s:%d",
+              proxy_spec.scheme, log.safe_addr_str(proxy_spec.hostname), proxy_spec.port)
+    if username or password:
+        log.debug("Using %s:%s as the proxy credentials",
+                  log.safe_addr_str(username), log.safe_addr_str(password))
+
+    if proxy_spec.scheme in ["socks4a", "socks5"]:
+        if proxy_spec.scheme == "socks4a":
+            if username:
+                assert(password == None)
+                SOCKSPoint = SOCKS4ClientEndpoint(host, port, TCPPoint, user=username)
+            else:
+                SOCKSPoint = SOCKS4ClientEndpoint(host, port, TCPPoint)
+        elif proxy_spec.scheme == "socks5":
+            if username and password:
+                SOCKSPoint = SOCKS5ClientEndpoint(host, port, TCPPoint,
+                                                  methods={'login': (username, password)})
+            else:
+                assert(username == None and password == None)
+                SOCKSPoint = SOCKS5ClientEndpoint(host, port, TCPPoint)
+        d = SOCKSPoint.connect(instance)
+        return d
+    elif proxy_spec.scheme == "http":
+        if username and password:
+            HTTPPoint = HTTPConnectClientEndpoint(host, port, TCPPoint,
+                                                  username, password)
+        else:
+            assert(username == None and password == None)
+            HTTPPoint = HTTPConnectClientEndpoint(host, port, TCPPoint)
+        d = HTTPPoint.connect(instance)
+        return d
+    else:
+        # Should *NEVER* happen
+        raise RuntimeError("Invalid proxy scheme %s" % proxy_spec.scheme)
+
+def ensure_outgoing_proxy_dependencies():
+    """Make sure that we have the necessary dependencies to connect to
+    outgoing HTTP/SOCKS proxies.
+
+    Raises OutgoingProxyDepsFailure in case of error.
+    """
+
+    # We can't connect to outgoing proxies without txsocksx.
+    try:
+        import txsocksx
+    except ImportError:
+        raise OutgoingProxyDepsFailure("We don't have txsocksx. Can't do proxy. Please install txsocksx.")
+
+    # We also need a recent version of twisted ( >= twisted-13.2.0)
+    import twisted
+    from twisted.python import versions
+    if twisted.version < versions.Version('twisted', 13, 2, 0):
+        raise OutgoingProxyDepsFailure("Outdated version of twisted (%s). Please upgrade to >= twisted-13.2.0" % twisted.version.short())
+
+class OutgoingProxyDepsFailure(Exception): pass

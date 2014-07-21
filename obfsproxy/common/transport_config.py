@@ -24,11 +24,21 @@ class TransportConfig( object ):
         self.stateLocation          = None
         self.serverTransportOptions = None
 
-    def setMode(self, mode):
-        if mode == 'managed':
-            self.is_managed_mode = True
-        else:
-            self.is_managed_mode = False
+        # True if we are client, False if not.
+        self.weAreClient = None
+        # True if we are in external mode. False otherwise.
+        self.weAreExternal = None
+
+        # Information about the outgoing SOCKS/HTTP proxy we need to
+        # connect to. See pyptlib.client_config.parseProxyURI().
+        self.proxy = None
+
+    def setProxy( self, proxy ):
+        """
+        Set the given 'proxy'.
+        """
+
+        self.proxy = proxy
 
     def setStateLocation( self, stateLocation ):
         """
@@ -57,6 +67,23 @@ class TransportConfig( object ):
         """
 
         return self.serverTransportOptions
+
+    def setListenerMode( self, mode ):
+        if mode == "client" or mode == "socks":
+            self.weAreClient = True
+        elif mode == "server" or mode == "ext_server":
+            self.weAreClient = False
+        else:
+            raise ValueError("Invalid listener mode: %s" % mode)
+
+    def setObfsproxyMode( self, mode ):
+        if mode == "external":
+            self.weAreExternal = True
+        elif mode == "managed":
+            self.weAreExternal = False
+        else:
+            raise ValueError("Invalid obfsproxy mode: %s" % mode)
+
 
     def __str__( self ):
         """

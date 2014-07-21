@@ -121,6 +121,9 @@ class ExtORPortProtocol(network.GenericProtocol):
         """
         We got some data, process it according to our current state.
         """
+        if self.closed:
+            log.debug("%s: ExtORPort dataReceived called while closed. Ignoring.", self.name)
+            return
 
         self.buffer.write(data_rcvd)
 
@@ -369,7 +372,7 @@ class ExtORPortServerFactory(network.StaticDestinationClientFactory):
     def buildProtocol(self, addr):
         log.debug("%s: New connection from %s:%d." % (self.name, log.safe_addr_str(addr.host), addr.port))
 
-        circuit = network.Circuit(self.transport_class(self.pt_config))
+        circuit = network.Circuit(self.transport_class())
 
         # XXX instantiates a new factory for each client
         clientFactory = ExtORPortClientFactory(circuit, self.cookie_file, addr, self.transport_name)
